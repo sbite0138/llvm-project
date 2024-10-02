@@ -321,6 +321,7 @@ enum {
   EM_VE = 251,            // NEC SX-Aurora VE
   EM_CSKY = 252,          // C-SKY 32-bit processor
   EM_LOONGARCH = 258,     // LoongArch
+  EM_MtG = 259,           // Magic: The Gathering
 };
 
 // Object file classes.
@@ -973,6 +974,38 @@ enum {
 #include "ELFRelocs/MSP430.def"
 };
 
+// MtG specific e_flags
+// Maybe removed later
+enum : unsigned {
+  EF_MtG_MACH_MtGx11 = 11,
+  EF_MtG_MACH_MtGx11x1 = 110,
+  EF_MtG_MACH_MtGx12 = 12,
+  EF_MtG_MACH_MtGx13 = 13,
+  EF_MtG_MACH_MtGx14 = 14,
+  EF_MtG_MACH_MtGx15 = 15,
+  EF_MtG_MACH_MtGx16 = 16,
+  EF_MtG_MACH_MtGx20 = 20,
+  EF_MtG_MACH_MtGx22 = 22,
+  EF_MtG_MACH_MtGx23 = 23,
+  EF_MtG_MACH_MtGx24 = 24,
+  EF_MtG_MACH_MtGx26 = 26,
+  EF_MtG_MACH_MtGx31 = 31,
+  EF_MtG_MACH_MtGx32 = 32,
+  EF_MtG_MACH_MtGx33 = 33,
+  EF_MtG_MACH_MtGx41 = 41,
+  EF_MtG_MACH_MtGx42 = 42,
+  EF_MtG_MACH_MtGx43 = 43,
+  EF_MtG_MACH_MtGx44 = 44,
+  EF_MtG_MACH_MtGX = 45,
+  EF_MtG_MACH_MtGx46 = 46,
+  EF_MtG_MACH_MtGx47 = 47,
+  EF_MtG_MACH_MtGx54 = 54,
+};
+// ELF Relocation types for MtG
+enum {
+#include "ELFRelocs/MtG.def"
+};
+
 // ELF Relocation type for VE.
 enum {
 #include "ELFRelocs/VE.def"
@@ -1008,14 +1041,14 @@ enum : unsigned {
   // (commit hash 296de4def055c871809068e0816325a4ac04eb12)
 
   // Base ABI Modifiers
-  EF_LOONGARCH_ABI_SOFT_FLOAT    = 0x1,
-  EF_LOONGARCH_ABI_SINGLE_FLOAT  = 0x2,
-  EF_LOONGARCH_ABI_DOUBLE_FLOAT  = 0x3,
+  EF_LOONGARCH_ABI_SOFT_FLOAT = 0x1,
+  EF_LOONGARCH_ABI_SINGLE_FLOAT = 0x2,
+  EF_LOONGARCH_ABI_DOUBLE_FLOAT = 0x3,
   EF_LOONGARCH_ABI_MODIFIER_MASK = 0x7,
 
   // Object file ABI versions
-  EF_LOONGARCH_OBJABI_V0   = 0x0,
-  EF_LOONGARCH_OBJABI_V1   = 0x40,
+  EF_LOONGARCH_OBJABI_V0 = 0x0,
+  EF_LOONGARCH_OBJABI_V1 = 0x40,
   EF_LOONGARCH_OBJABI_MASK = 0xC0,
 };
 
@@ -1166,6 +1199,7 @@ enum : unsigned {
   SHT_MIPS_ABIFLAGS = 0x7000002a, // ABI information.
 
   SHT_MSP430_ATTRIBUTES = 0x70000003U,
+  SHT_MtG_ATTRIBUTES = 0x70000003U,
 
   SHT_RISCV_ATTRIBUTES = 0x70000003U,
 

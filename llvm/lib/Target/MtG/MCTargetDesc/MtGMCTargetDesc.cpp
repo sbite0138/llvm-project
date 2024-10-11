@@ -45,8 +45,8 @@ static MCRegisterInfo *createMtGMCRegisterInfo(const Triple &TT) {
 }
 
 static MCAsmInfo *createMtGMCAsmInfo(const MCRegisterInfo &MRI,
-                                        const Triple &TT,
-                                        const MCTargetOptions &Options) {
+                                     const Triple &TT,
+                                     const MCTargetOptions &Options) {
   MCAsmInfo *MAI = new MtGMCAsmInfo(TT);
 
   // Initialize initial frame state.
@@ -65,16 +65,16 @@ static MCAsmInfo *createMtGMCAsmInfo(const MCRegisterInfo &MRI,
   return MAI;
 }
 
-static MCSubtargetInfo *
-createMtGMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
+static MCSubtargetInfo *createMtGMCSubtargetInfo(const Triple &TT,
+                                                 StringRef CPU, StringRef FS) {
   return createMtGMCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
 }
 
 static MCInstPrinter *createMtGMCInstPrinter(const Triple &T,
-                                                unsigned SyntaxVariant,
-                                                const MCAsmInfo &MAI,
-                                                const MCInstrInfo &MII,
-                                                const MCRegisterInfo &MRI) {
+                                             unsigned SyntaxVariant,
+                                             const MCAsmInfo &MAI,
+                                             const MCInstrInfo &MII,
+                                             const MCRegisterInfo &MRI) {
   if (SyntaxVariant == 0)
     return new MtGInstPrinter(MAI, MII, MRI);
   return nullptr;
@@ -89,7 +89,4 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMtGTargetMC() {
   TargetRegistry::RegisterMCSubtargetInfo(T, createMtGMCSubtargetInfo);
   TargetRegistry::RegisterMCInstPrinter(T, createMtGMCInstPrinter);
   TargetRegistry::RegisterMCCodeEmitter(T, createMtGMCCodeEmitter);
-  TargetRegistry::RegisterMCAsmBackend(T, createMtGMCAsmBackend);
-  TargetRegistry::RegisterObjectTargetStreamer(
-      T, createMtGObjectTargetStreamer);
 }

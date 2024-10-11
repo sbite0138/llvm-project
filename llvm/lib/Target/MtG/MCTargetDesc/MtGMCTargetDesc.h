@@ -30,21 +30,14 @@ class MCStreamer;
 class MCTargetStreamer;
 
 /// Creates a machine code emitter for MtG.
-MCCodeEmitter *createMtGMCCodeEmitter(const MCInstrInfo &MCII,
-                                         MCContext &Ctx);
+MCCodeEmitter *createMtGMCCodeEmitter(const MCInstrInfo &MCII, MCContext &Ctx);
 
-MCAsmBackend *createMtGMCAsmBackend(const Target &T,
-                                       const MCSubtargetInfo &STI,
-                                       const MCRegisterInfo &MRI,
-                                       const MCTargetOptions &Options);
+MCTargetStreamer *createMtGObjectTargetStreamer(MCStreamer &S,
+                                                const MCSubtargetInfo &STI);
 
-MCTargetStreamer *
-createMtGObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI);
+std::unique_ptr<MCObjectTargetWriter> createMtGELFObjectWriter(uint8_t OSABI);
 
-std::unique_ptr<MCObjectTargetWriter>
-createMtGELFObjectWriter(uint8_t OSABI);
-
-} // End llvm namespace
+} // namespace llvm
 
 // Defines symbolic names for MtG registers.
 // This defines a mapping from register name to register number.

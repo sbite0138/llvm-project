@@ -26,14 +26,9 @@ public:
 
   /// Code Generation virtual methods...
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
-
   BitVector getReservedRegs(const MachineFunction &MF) const override;
-  const TargetRegisterClass*
-  getPointerRegClass(const MachineFunction &MF,
-                     unsigned Kind = 0) const override;
-
-  bool eliminateFrameIndex(MachineBasicBlock::iterator II,
-                           int SPAdj, unsigned FIOperandNum,
+  bool eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
+                           unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
 
   // Debug information queries.

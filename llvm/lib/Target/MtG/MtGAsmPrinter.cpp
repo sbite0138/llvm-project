@@ -39,32 +39,31 @@ using namespace llvm;
 #define DEBUG_TYPE "asm-printer"
 
 namespace {
-  class MtGAsmPrinter : public AsmPrinter {
-  public:
-    MtGAsmPrinter(TargetMachine &TM, std::unique_ptr<MCStreamer> Streamer)
-        : AsmPrinter(TM, std::move(Streamer)) {}
+class MtGAsmPrinter : public AsmPrinter {
+public:
+  MtGAsmPrinter(TargetMachine &TM, std::unique_ptr<MCStreamer> Streamer)
+      : AsmPrinter(TM, std::move(Streamer)) {}
 
-    StringRef getPassName() const override { return "MtG Assembly Printer"; }
+  StringRef getPassName() const override { return "MtG Assembly Printer"; }
 
-    bool runOnMachineFunction(MachineFunction &MF) override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-    void PrintSymbolOperand(const MachineOperand &MO, raw_ostream &O) override;
-    void printOperand(const MachineInstr *MI, int OpNum,
-                      raw_ostream &O, const char* Modifier = nullptr);
-    void printSrcMemOperand(const MachineInstr *MI, int OpNum,
-                            raw_ostream &O);
-    bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                         const char *ExtraCode, raw_ostream &O) override;
-    bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
-                               const char *ExtraCode, raw_ostream &O) override;
-    void emitInstruction(const MachineInstr *MI) override;
+  void PrintSymbolOperand(const MachineOperand &MO, raw_ostream &O) override;
+  void printOperand(const MachineInstr *MI, int OpNum, raw_ostream &O,
+                    const char *Modifier = nullptr);
+  void printSrcMemOperand(const MachineInstr *MI, int OpNum, raw_ostream &O);
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       const char *ExtraCode, raw_ostream &O) override;
+  bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                             const char *ExtraCode, raw_ostream &O) override;
+  void emitInstruction(const MachineInstr *MI) override;
 
-    void EmitInterruptVectorSection(MachineFunction &ISR);
-  };
+  void EmitInterruptVectorSection(MachineFunction &ISR);
+};
 } // end of anonymous namespace
 
 void MtGAsmPrinter::PrintSymbolOperand(const MachineOperand &MO,
-                                          raw_ostream &O) {
+                                       raw_ostream &O) {
   uint64_t Offset = MO.getOffset();
   if (Offset)
     O << '(' << Offset << '+';
@@ -76,10 +75,11 @@ void MtGAsmPrinter::PrintSymbolOperand(const MachineOperand &MO,
 }
 
 void MtGAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,
-                                    raw_ostream &O, const char *Modifier) {
+                                 raw_ostream &O, const char *Modifier) {
   const MachineOperand &MO = MI->getOperand(OpNum);
   switch (MO.getType()) {
-  default: llvm_unreachable("Not implemented yet!");
+  default:
+    llvm_unreachable("Not implemented yet!");
   case MachineOperand::MO_Register:
     O << MtGInstPrinter::getRegisterName(MO.getReg());
     return;
@@ -105,29 +105,29 @@ void MtGAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,
 }
 
 void MtGAsmPrinter::printSrcMemOperand(const MachineInstr *MI, int OpNum,
-                                          raw_ostream &O) {
+                                       raw_ostream &O) {
   const MachineOperand &Base = MI->getOperand(OpNum);
-  const MachineOperand &Disp = MI->getOperand(OpNum+1);
+  const MachineOperand &Disp = MI->getOperand(OpNum + 1);
 
   // Print displacement first
 
-  // Imm here is in fact global address - print extra modifier.
-  if (Disp.isImm() && Base.getReg() == MtG::SR)
-    O << '&';
-  printOperand(MI, OpNum+1, O, "nohash");
+  // // Imm here is in fact global address - print extra modifier.
+  // if (Disp.isImm() && Base.getReg() == MtG::SR)
+  //   O << '&';
+  // printOperand(MI, OpNum+1, O, "nohash");
 
-  // Print register base field
-  if (Base.getReg() != MtG::SR && Base.getReg() != MtG::PC) {
-    O << '(';
-    printOperand(MI, OpNum, O);
-    O << ')';
-  }
+  // // Print register base field
+  // if (Base.getReg() != MtG::SR && Base.getReg() != MtG::PC) {
+  //   O << '(';
+  //   printOperand(MI, OpNum, O);
+  //   O << ')';
+  // }
 }
 
 /// PrintAsmOperand - Print out an operand for an inline asm expression.
 ///
 bool MtGAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                                       const char *ExtraCode, raw_ostream &O) {
+                                    const char *ExtraCode, raw_ostream &O) {
   // Does this asm operand have a single letter operand modifier?
   if (ExtraCode && ExtraCode[0])
     return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
@@ -136,10 +136,9 @@ bool MtGAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   return false;
 }
 
-bool MtGAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
-                                             unsigned OpNo,
-                                             const char *ExtraCode,
-                                             raw_ostream &O) {
+bool MtGAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                                          const char *ExtraCode,
+                                          raw_ostream &O) {
   if (ExtraCode && ExtraCode[0]) {
     return true; // Unknown modifier.
   }
@@ -150,7 +149,7 @@ bool MtGAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 //===----------------------------------------------------------------------===//
 void MtGAsmPrinter::emitInstruction(const MachineInstr *MI) {
   MtG_MC::verifyInstructionPredicates(MI->getOpcode(),
-                                         getSubtargetInfo().getFeatureBits());
+                                      getSubtargetInfo().getFeatureBits());
 
   MtGMCInstLower MCInstLowering(OutContext, *this);
 
@@ -163,12 +162,13 @@ void MtGAsmPrinter::EmitInterruptVectorSection(MachineFunction &ISR) {
   MCSection *Cur = OutStreamer->getCurrentSectionOnly();
   const auto *F = &ISR.getFunction();
   if (F->getCallingConv() != CallingConv::MtG_INTR) {
-    report_fatal_error("Functions with 'interrupt' attribute must have mtg_intrcc CC");
+    report_fatal_error(
+        "Functions with 'interrupt' attribute must have mtg_intrcc CC");
   }
   StringRef IVIdx = F->getFnAttribute("interrupt").getValueAsString();
   MCSection *IV = OutStreamer->getContext().getELFSection(
-    "__interrupt_vector_" + IVIdx,
-    ELF::SHT_PROGBITS, ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
+      "__interrupt_vector_" + IVIdx, ELF::SHT_PROGBITS,
+      ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
   OutStreamer->switchSection(IV);
 
   const MCSymbol *FunctionSymbol = getSymbol(F);

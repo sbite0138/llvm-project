@@ -31,15 +31,15 @@ void MtGInstPrinter::printRegName(raw_ostream &O, MCRegister Reg) const {
 }
 
 void MtGInstPrinter::printInst(const MCInst *MI, uint64_t Address,
-                                  StringRef Annot, const MCSubtargetInfo &STI,
-                                  raw_ostream &O) {
+                               StringRef Annot, const MCSubtargetInfo &STI,
+                               raw_ostream &O) {
   if (!printAliasInstr(MI, Address, O))
     printInstruction(MI, Address, O);
   printAnnotation(O, Annot);
 }
 
 void MtGInstPrinter::printPCRelImmOperand(const MCInst *MI, unsigned OpNo,
-                                             raw_ostream &O) {
+                                          raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm()) {
     int64_t Imm = Op.getImm() * 2 + 2;
@@ -54,7 +54,7 @@ void MtGInstPrinter::printPCRelImmOperand(const MCInst *MI, unsigned OpNo,
 }
 
 void MtGInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
-                                     raw_ostream &O, const char *Modifier) {
+                                  raw_ostream &O, const char *Modifier) {
   assert((Modifier == nullptr || Modifier[0] == 0) && "No modifiers supported");
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
@@ -69,74 +69,73 @@ void MtGInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
 }
 
 void MtGInstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
-                                           raw_ostream &O,
-                                           const char *Modifier) {
-  const MCOperand &Base = MI->getOperand(OpNo);
-  const MCOperand &Disp = MI->getOperand(OpNo+1);
+                                        raw_ostream &O, const char *Modifier) {
+  // const MCOperand &Base = MI->getOperand(OpNo);
+  // const MCOperand &Disp = MI->getOperand(OpNo+1);
 
-  // Print displacement first
+  // // Print displacement first
 
-  // If the global address expression is a part of displacement field with a
-  // register base, we should not emit any prefix symbol here, e.g.
-  //   mov.w &foo, r1
-  // vs
-  //   mov.w glb(r1), r2
-  // Otherwise (!) mtg-as will silently miscompile the output :(
-  if (Base.getReg() == MtG::SR)
-    O << '&';
+  // // If the global address expression is a part of displacement field with a
+  // // register base, we should not emit any prefix symbol here, e.g.
+  // //   mov.w &foo, r1
+  // // vs
+  // //   mov.w glb(r1), r2
+  // // Otherwise (!) mtg-as will silently miscompile the output :(
+  // if (Base.getReg() == MtG::SR)
+  //   O << '&';
 
-  if (Disp.isExpr())
-    Disp.getExpr()->print(O, &MAI);
-  else {
-    assert(Disp.isImm() && "Expected immediate in displacement field");
-    O << Disp.getImm();
-  }
+  // if (Disp.isExpr())
+  //   Disp.getExpr()->print(O, &MAI);
+  // else {
+  //   assert(Disp.isImm() && "Expected immediate in displacement field");
+  //   O << Disp.getImm();
+  // }
 
-  // Print register base field
-  if ((Base.getReg() != MtG::SR) &&
-      (Base.getReg() != MtG::PC))
-    O << '(' << getRegisterName(Base.getReg()) << ')';
+  // // Print register base field
+  // if ((Base.getReg() != MtG::SR) &&
+  //     (Base.getReg() != MtG::PC))
+  //   O << '(' << getRegisterName(Base.getReg()) << ')';
 }
 
 void MtGInstPrinter::printIndRegOperand(const MCInst *MI, unsigned OpNo,
-                                           raw_ostream &O) {
+                                        raw_ostream &O) {
   const MCOperand &Base = MI->getOperand(OpNo);
   O << "@" << getRegisterName(Base.getReg());
 }
 
 void MtGInstPrinter::printPostIndRegOperand(const MCInst *MI, unsigned OpNo,
-                                               raw_ostream &O) {
+                                            raw_ostream &O) {
   const MCOperand &Base = MI->getOperand(OpNo);
   O << "@" << getRegisterName(Base.getReg()) << "+";
 }
 
 void MtGInstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo,
-                                       raw_ostream &O) {
+                                    raw_ostream &O) {
   unsigned CC = MI->getOperand(OpNo).getImm();
 
   switch (CC) {
   default:
-   llvm_unreachable("Unsupported CC code");
+    llvm_unreachable("Unsupported CC code");
   case MtGCC::COND_E:
-   O << "eq";
-   break;
+    O << "eq";
+    break;
   case MtGCC::COND_NE:
-   O << "ne";
-   break;
+    O << "ne";
+    break;
   case MtGCC::COND_HS:
-   O << "hs";
-   break;
+    O << "hs";
+    break;
   case MtGCC::COND_LO:
-   O << "lo";
-   break;
+    O << "lo";
+    break;
   case MtGCC::COND_GE:
-   O << "ge";
-   break;
+    O << "ge";
+    break;
   case MtGCC::COND_L:
-   O << 'l';
-   break;
+    O << 'l';
+    break;
   case MtGCC::COND_N:
-   O << 'n';
-   break;
+    O << 'n';
+    break;
   }
 }

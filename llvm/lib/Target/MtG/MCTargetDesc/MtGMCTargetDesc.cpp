@@ -40,7 +40,7 @@ static MCInstrInfo *createMtGMCInstrInfo() {
 
 static MCRegisterInfo *createMtGMCRegisterInfo(const Triple &TT) {
   MCRegisterInfo *X = new MCRegisterInfo();
-  InitMtGMCRegisterInfo(X, MtG::PC);
+  // InitMtGMCRegisterInfo(X, MtG::PC);
   return X;
 }
 
@@ -49,18 +49,18 @@ static MCAsmInfo *createMtGMCAsmInfo(const MCRegisterInfo &MRI,
                                      const MCTargetOptions &Options) {
   MCAsmInfo *MAI = new MtGMCAsmInfo(TT);
 
-  // Initialize initial frame state.
-  int stackGrowth = -2;
+  // // Initialize initial frame state.
+  // int stackGrowth = -2;
 
-  // Initial state of the frame pointer is sp+ptr_size.
-  MCCFIInstruction Inst = MCCFIInstruction::cfiDefCfa(
-      nullptr, MRI.getDwarfRegNum(MtG::SP, true), -stackGrowth);
-  MAI->addInitialFrameState(Inst);
+  // // Initial state of the frame pointer is sp+ptr_size.
+  // MCCFIInstruction Inst = MCCFIInstruction::cfiDefCfa(
+  //     nullptr, MRI.getDwarfRegNum(MtG::SP, true), -stackGrowth);
+  // MAI->addInitialFrameState(Inst);
 
-  // Add return address to move list
-  MCCFIInstruction Inst2 = MCCFIInstruction::createOffset(
-      nullptr, MRI.getDwarfRegNum(MtG::PC, true), stackGrowth);
-  MAI->addInitialFrameState(Inst2);
+  // // Add return address to move list
+  // MCCFIInstruction Inst2 = MCCFIInstruction::createOffset(
+  //     nullptr, MRI.getDwarfRegNum(MtG::PC, true), stackGrowth);
+  // MAI->addInitialFrameState(Inst2);
 
   return MAI;
 }

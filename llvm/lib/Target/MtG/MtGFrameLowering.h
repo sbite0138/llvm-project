@@ -24,7 +24,6 @@ class MtGRegisterInfo;
 
 class MtGFrameLowering : public TargetFrameLowering {
 protected:
-
 public:
   MtGFrameLowering(const MtGSubtarget &STI);
 
@@ -37,35 +36,37 @@ public:
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
 
-  MachineBasicBlock::iterator
-  eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
-                                MachineBasicBlock::iterator I) const override;
+  // MachineBasicBlock::iterator
+  // eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
+  //                               MachineBasicBlock::iterator I) const
+  //                               override;
 
-  bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
-                                 MachineBasicBlock::iterator MI,
-                                 ArrayRef<CalleeSavedInfo> CSI,
-                                 const TargetRegisterInfo *TRI) const override;
-  bool
-  restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator MI,
-                              MutableArrayRef<CalleeSavedInfo> CSI,
-                              const TargetRegisterInfo *TRI) const override;
+  // bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
+  //                                MachineBasicBlock::iterator MI,
+  //                                ArrayRef<CalleeSavedInfo> CSI,
+  //                                const TargetRegisterInfo *TRI) const
+  //                                override;
+  // bool
+  // restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
+  //                             MachineBasicBlock::iterator MI,
+  //                             MutableArrayRef<CalleeSavedInfo> CSI,
+  //                             const TargetRegisterInfo *TRI) const override;
 
-  bool hasFP(const MachineFunction &MF) const override;
-  bool hasReservedCallFrame(const MachineFunction &MF) const override;
-  void processFunctionBeforeFrameFinalized(MachineFunction &MF,
-                                     RegScavenger *RS = nullptr) const override;
+  bool hasFP(const MachineFunction &MF) const override { return false; };
+  // bool hasReservedCallFrame(const MachineFunction &MF) const override;
+  // void processFunctionBeforeFrameFinalized(
+  //     MachineFunction &MF, RegScavenger *RS = nullptr) const override;
 
-  /// Wraps up getting a CFI index and building a MachineInstr for it.
-  void BuildCFI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
-                const DebugLoc &DL, const MCCFIInstruction &CFIInst,
-                MachineInstr::MIFlag Flag = MachineInstr::NoFlags) const;
+  // /// Wraps up getting a CFI index and building a MachineInstr for it.
+  // void BuildCFI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+  //               const DebugLoc &DL, const MCCFIInstruction &CFIInst,
+  //               MachineInstr::MIFlag Flag = MachineInstr::NoFlags) const;
 
-  void emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
-                                 MachineBasicBlock::iterator MBBI,
-                                 const DebugLoc &DL, bool IsPrologue) const;
+  // void emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
+  //                                MachineBasicBlock::iterator MBBI,
+  //                                const DebugLoc &DL, bool IsPrologue) const;
 };
 
-} // End llvm namespace
+} // namespace llvm
 
 #endif

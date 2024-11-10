@@ -6,9 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
 #include "MtGRegisterInfo.h"
-#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "TargetInfo/MtGTargetInfo.h"
 
 #include "llvm/ADT/APInt.h"
@@ -78,7 +78,7 @@ class MtGAsmParser : public MCTargetAsmParser {
 
 public:
   MtGAsmParser(const MCSubtargetInfo &STI, MCAsmParser &Parser,
-                  const MCInstrInfo &MII, const MCTargetOptions &Options)
+               const MCInstrInfo &MII, const MCTargetOptions &Options)
       : MCTargetAsmParser(Options, STI, MII), STI(STI), Parser(Parser) {
     MCAsmParserExtension::Initialize(Parser);
     MRI = getContext().getRegisterInfo();
@@ -91,14 +91,7 @@ public:
 class MtGOperand : public MCParsedAsmOperand {
   typedef MCParsedAsmOperand Base;
 
-  enum KindTy {
-    k_Imm,
-    k_Reg,
-    k_Tok,
-    k_Mem,
-    k_IndReg,
-    k_PostIndReg
-  } Kind;
+  enum KindTy { k_Imm, k_Reg, k_Tok, k_Mem, k_IndReg, k_PostIndReg } Kind;
 
   struct Memory {
     MCRegister Reg;
@@ -106,9 +99,9 @@ class MtGOperand : public MCParsedAsmOperand {
   };
   union {
     const MCExpr *Imm;
-    MCRegister    Reg;
-    StringRef     Tok;
-    Memory        Mem;
+    MCRegister Reg;
+    StringRef Tok;
+    Memory Mem;
   };
 
   SMLoc Start, End;
@@ -120,13 +113,12 @@ public:
       : Kind(Kind), Reg(Reg), Start(S), End(E) {}
   MtGOperand(MCExpr const *Imm, SMLoc const &S, SMLoc const &E)
       : Kind(k_Imm), Imm(Imm), Start(S), End(E) {}
-  MtGOperand(MCRegister Reg, MCExpr const *Expr, SMLoc const &S,
-                SMLoc const &E)
+  MtGOperand(MCRegister Reg, MCExpr const *Expr, SMLoc const &S, SMLoc const &E)
       : Kind(k_Mem), Mem({Reg, Expr}), Start(S), End(E) {}
 
   void addRegOperands(MCInst &Inst, unsigned N) const {
     assert((Kind == k_Reg || Kind == k_IndReg || Kind == k_PostIndReg) &&
-        "Unexpected operand kind");
+           "Unexpected operand kind");
     assert(N == 1 && "Invalid number of operands!");
 
     Inst.addOperand(MCOperand::createReg(Reg));
@@ -157,12 +149,12 @@ public:
     addExprOperand(Inst, Mem.Offset);
   }
 
-  bool isReg()   const override { return Kind == k_Reg; }
-  bool isImm()   const override { return Kind == k_Imm; }
+  bool isReg() const override { return Kind == k_Reg; }
+  bool isImm() const override { return Kind == k_Imm; }
   bool isToken() const override { return Kind == k_Tok; }
-  bool isMem()   const override { return Kind == k_Mem; }
-  bool isIndReg()         const { return Kind == k_IndReg; }
-  bool isPostIndReg()     const { return Kind == k_PostIndReg; }
+  bool isMem() const override { return Kind == k_Mem; }
+  bool isIndReg() const { return Kind == k_IndReg; }
+  bool isPostIndReg() const { return Kind == k_PostIndReg; }
 
   bool isCGImm() const {
     if (Kind != k_Imm)
@@ -171,7 +163,7 @@ public:
     int64_t Val;
     if (!Imm->evaluateAsAbsolute(Val))
       return false;
-    
+
     if (Val == 0 || Val == 1 || Val == 2 || Val == 4 || Val == 8 || Val == -1)
       return true;
 
@@ -198,12 +190,12 @@ public:
   }
 
   static std::unique_ptr<MtGOperand> CreateReg(MCRegister Reg, SMLoc S,
-                                                  SMLoc E) {
+                                               SMLoc E) {
     return std::make_unique<MtGOperand>(k_Reg, Reg, S, E);
   }
 
   static std::unique_ptr<MtGOperand> CreateImm(const MCExpr *Val, SMLoc S,
-                                                  SMLoc E) {
+                                               SMLoc E) {
     return std::make_unique<MtGOperand>(Val, S, E);
   }
 
@@ -213,12 +205,12 @@ public:
   }
 
   static std::unique_ptr<MtGOperand> CreateIndReg(MCRegister Reg, SMLoc S,
-                                                     SMLoc E) {
+                                                  SMLoc E) {
     return std::make_unique<MtGOperand>(k_IndReg, Reg, S, E);
   }
 
-  static std::unique_ptr<MtGOperand> CreatePostIndReg(MCRegister Reg,
-                                                         SMLoc S, SMLoc E) {
+  static std::unique_ptr<MtGOperand> CreatePostIndReg(MCRegister Reg, SMLoc S,
+                                                      SMLoc E) {
     return std::make_unique<MtGOperand>(k_PostIndReg, Reg, S, E);
   }
 
@@ -252,10 +244,9 @@ public:
 } // end anonymous namespace
 
 bool MtGAsmParser::matchAndEmitInstruction(SMLoc Loc, unsigned &Opcode,
-                                              OperandVector &Operands,
-                                              MCStreamer &Out,
-                                              uint64_t &ErrorInfo,
-                                              bool MatchingInlineAsm) {
+                                           OperandVector &Operands,
+                                           MCStreamer &Out, uint64_t &ErrorInfo,
+                                           bool MatchingInlineAsm) {
   MCInst Inst;
   unsigned MatchResult =
       MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm);
@@ -289,7 +280,7 @@ static MCRegister MatchRegisterName(StringRef Name);
 static MCRegister MatchRegisterAltName(StringRef Name);
 
 bool MtGAsmParser::parseRegister(MCRegister &Reg, SMLoc &StartLoc,
-                                    SMLoc &EndLoc) {
+                                 SMLoc &EndLoc) {
   ParseStatus Res = tryParseRegister(Reg, StartLoc, EndLoc);
   if (Res.isFailure())
     return Error(StartLoc, "invalid register name");
@@ -302,7 +293,7 @@ bool MtGAsmParser::parseRegister(MCRegister &Reg, SMLoc &StartLoc,
 }
 
 ParseStatus MtGAsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
-                                              SMLoc &EndLoc) {
+                                           SMLoc &EndLoc) {
   if (getLexer().getKind() == AsmToken::Identifier) {
     auto Name = getLexer().getTok().getIdentifier().lower();
     Reg = MatchRegisterName(Name);
@@ -324,8 +315,8 @@ ParseStatus MtGAsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
 }
 
 bool MtGAsmParser::parseJccInstruction(ParseInstructionInfo &Info,
-                                          StringRef Name, SMLoc NameLoc,
-                                          OperandVector &Operands) {
+                                       StringRef Name, SMLoc NameLoc,
+                                       OperandVector &Operands) {
   if (!Name.starts_with_insensitive("j"))
     return true;
 
@@ -371,8 +362,7 @@ bool MtGAsmParser::parseJccInstruction(ParseInstructionInfo &Info,
     if (Res < -512 || Res > 511)
       return Error(ExprLoc, "invalid jump offset");
 
-  Operands.push_back(MtGOperand::CreateImm(Val, ExprLoc,
-    getLexer().getLoc()));
+  Operands.push_back(MtGOperand::CreateImm(Val, ExprLoc, getLexer().getLoc()));
 
   if (getLexer().isNot(AsmToken::EndOfStatement)) {
     SMLoc Loc = getLexer().getLoc();
@@ -384,9 +374,8 @@ bool MtGAsmParser::parseJccInstruction(ParseInstructionInfo &Info,
   return false;
 }
 
-bool MtGAsmParser::parseInstruction(ParseInstructionInfo &Info,
-                                       StringRef Name, SMLoc NameLoc,
-                                       OperandVector &Operands) {
+bool MtGAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                                    SMLoc NameLoc, OperandVector &Operands) {
   // Drop .w suffix
   if (Name.ends_with_insensitive(".w"))
     Name = Name.drop_back(2);
@@ -443,86 +432,86 @@ ParseStatus MtGAsmParser::parseDirective(AsmToken DirectiveID) {
 }
 
 bool MtGAsmParser::ParseOperand(OperandVector &Operands) {
-  switch (getLexer().getKind()) {
-    default: return true;
-    case AsmToken::Identifier: {
-      // try rN
-      MCRegister RegNo;
-      SMLoc StartLoc, EndLoc;
-      if (!parseRegister(RegNo, StartLoc, EndLoc)) {
-        Operands.push_back(MtGOperand::CreateReg(RegNo, StartLoc, EndLoc));
-        return false;
-      }
-      [[fallthrough]];
-    }
-    case AsmToken::Integer:
-    case AsmToken::Plus:
-    case AsmToken::Minus: {
-      SMLoc StartLoc = getParser().getTok().getLoc();
-      const MCExpr *Val;
-      // Try constexpr[(rN)]
-      if (!getParser().parseExpression(Val)) {
-        MCRegister RegNo = MtG::PC;
-        SMLoc EndLoc = getParser().getTok().getLoc();
-        // Try (rN)
-        if (parseOptionalToken(AsmToken::LParen)) {
-          SMLoc RegStartLoc;
-          if (parseRegister(RegNo, RegStartLoc, EndLoc))
-            return true;
-          EndLoc = getParser().getTok().getEndLoc();
-          if (!parseOptionalToken(AsmToken::RParen))
-            return true;
-        }
-        Operands.push_back(MtGOperand::CreateMem(RegNo, Val, StartLoc,
-          EndLoc));
-        return false;
-      }
-      return true;
-    }
-    case AsmToken::Amp: {
-      // Try &constexpr
-      SMLoc StartLoc = getParser().getTok().getLoc();
-      getLexer().Lex(); // Eat '&'
-      const MCExpr *Val;
-      if (!getParser().parseExpression(Val)) {
-        SMLoc EndLoc = getParser().getTok().getLoc();
-        Operands.push_back(MtGOperand::CreateMem(MtG::SR, Val, StartLoc,
-          EndLoc));
-        return false;
-      }
-      return true;
-    }
-    case AsmToken::At: {
-      // Try @rN[+]
-      SMLoc StartLoc = getParser().getTok().getLoc();
-      getLexer().Lex(); // Eat '@'
-      MCRegister RegNo;
-      SMLoc RegStartLoc, EndLoc;
-      if (parseRegister(RegNo, RegStartLoc, EndLoc))
-        return true;
-      if (parseOptionalToken(AsmToken::Plus)) {
-        Operands.push_back(MtGOperand::CreatePostIndReg(RegNo, StartLoc, EndLoc));
-        return false;
-      }
-      if (Operands.size() > 1) // Emulate @rd in destination position as 0(rd)
-        Operands.push_back(MtGOperand::CreateMem(RegNo,
-            MCConstantExpr::create(0, getContext()), StartLoc, EndLoc));
-      else
-        Operands.push_back(MtGOperand::CreateIndReg(RegNo, StartLoc, EndLoc));
-      return false;
-    }
-    case AsmToken::Hash:
-      // Try #constexpr
-      SMLoc StartLoc = getParser().getTok().getLoc();
-      getLexer().Lex(); // Eat '#'
-      const MCExpr *Val;
-      if (!getParser().parseExpression(Val)) {
-        SMLoc EndLoc = getParser().getTok().getLoc();
-        Operands.push_back(MtGOperand::CreateImm(Val, StartLoc, EndLoc));
-        return false;
-      }
-      return true;
-  }
+  // switch (getLexer().getKind()) {
+  // default:
+  //   return true;
+  // case AsmToken::Identifier: {
+  //   // try rN
+  //   MCRegister RegNo;
+  //   SMLoc StartLoc, EndLoc;
+  //   if (!parseRegister(RegNo, StartLoc, EndLoc)) {
+  //     Operands.push_back(MtGOperand::CreateReg(RegNo, StartLoc, EndLoc));
+  //     return false;
+  //   }
+  //   [[fallthrough]];
+  // }
+  // case AsmToken::Integer:
+  // case AsmToken::Plus:
+  // case AsmToken::Minus: {
+  //   SMLoc StartLoc = getParser().getTok().getLoc();
+  //   const MCExpr *Val;
+  //   // Try constexpr[(rN)]
+  //   if (!getParser().parseExpression(Val)) {
+  //     MCRegister RegNo = MtG::PC;
+  //     SMLoc EndLoc = getParser().getTok().getLoc();
+  //     // Try (rN)
+  //     if (parseOptionalToken(AsmToken::LParen)) {
+  //       SMLoc RegStartLoc;
+  //       if (parseRegister(RegNo, RegStartLoc, EndLoc))
+  //         return true;
+  //       EndLoc = getParser().getTok().getEndLoc();
+  //       if (!parseOptionalToken(AsmToken::RParen))
+  //         return true;
+  //     }
+  //     Operands.push_back(MtGOperand::CreateMem(RegNo, Val, StartLoc,
+  //     EndLoc)); return false;
+  //   }
+  //   return true;
+  // }
+  // case AsmToken::Amp: {
+  //   // Try &constexpr
+  //   SMLoc StartLoc = getParser().getTok().getLoc();
+  //   getLexer().Lex(); // Eat '&'
+  //   const MCExpr *Val;
+  //   if (!getParser().parseExpression(Val)) {
+  //     SMLoc EndLoc = getParser().getTok().getLoc();
+  //     Operands.push_back(MtGOperand::CreateMem(MtG::SR, Val, StartLoc,
+  //     EndLoc)); return false;
+  //   }
+  //   return true;
+  // }
+  // case AsmToken::At: {
+  //   // Try @rN[+]
+  //   SMLoc StartLoc = getParser().getTok().getLoc();
+  //   getLexer().Lex(); // Eat '@'
+  //   MCRegister RegNo;
+  //   SMLoc RegStartLoc, EndLoc;
+  //   if (parseRegister(RegNo, RegStartLoc, EndLoc))
+  //     return true;
+  //   if (parseOptionalToken(AsmToken::Plus)) {
+  //     Operands.push_back(MtGOperand::CreatePostIndReg(RegNo, StartLoc,
+  //     EndLoc)); return false;
+  //   }
+  //   if (Operands.size() > 1) // Emulate @rd in destination position as 0(rd)
+  //     Operands.push_back(MtGOperand::CreateMem(
+  //         RegNo, MCConstantExpr::create(0, getContext()), StartLoc, EndLoc));
+  //   else
+  //     Operands.push_back(MtGOperand::CreateIndReg(RegNo, StartLoc, EndLoc));
+  //   return false;
+  // }
+  // case AsmToken::Hash:
+  //   // Try #constexpr
+  //   SMLoc StartLoc = getParser().getTok().getLoc();
+  //   getLexer().Lex(); // Eat '#'
+  //   const MCExpr *Val;
+  //   if (!getParser().parseExpression(Val)) {
+  //     SMLoc EndLoc = getParser().getTok().getLoc();
+  //     Operands.push_back(MtGOperand::CreateImm(Val, StartLoc, EndLoc));
+  //     return false;
+  //   }
+  //   return true;
+  // }
+  return true;
 }
 
 bool MtGAsmParser::ParseLiteralValues(unsigned Size, SMLoc L) {
@@ -544,44 +533,20 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMtGAsmParser() {
 #define GET_MATCHER_IMPLEMENTATION
 #include "MtGGenAsmMatcher.inc"
 
-static MCRegister convertGR16ToGR8(MCRegister Reg) {
-  switch (Reg.id()) {
-  default:
-    llvm_unreachable("Unknown GR16 register");
-  case MtG::PC:  return MtG::PCB;
-  case MtG::SP:  return MtG::SPB;
-  case MtG::SR:  return MtG::SRB;
-  case MtG::CG:  return MtG::CGB;
-  case MtG::R4:  return MtG::R4B;
-  case MtG::R5:  return MtG::R5B;
-  case MtG::R6:  return MtG::R6B;
-  case MtG::R7:  return MtG::R7B;
-  case MtG::R8:  return MtG::R8B;
-  case MtG::R9:  return MtG::R9B;
-  case MtG::R10: return MtG::R10B;
-  case MtG::R11: return MtG::R11B;
-  case MtG::R12: return MtG::R12B;
-  case MtG::R13: return MtG::R13B;
-  case MtG::R14: return MtG::R14B;
-  case MtG::R15: return MtG::R15B;
-  }
-}
-
 unsigned MtGAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
-                                                     unsigned Kind) {
-  MtGOperand &Op = static_cast<MtGOperand &>(AsmOp);
+                                                  unsigned Kind) {
+  // MtGOperand &Op = static_cast<MtGOperand &>(AsmOp);
 
-  if (!Op.isReg())
-    return Match_InvalidOperand;
+  // if (!Op.isReg())
+  //   return Match_InvalidOperand;
 
-  MCRegister Reg = Op.getReg();
-  bool isGR16 =
-      MtGMCRegisterClasses[MtG::GR16RegClassID].contains(Reg);
+  // MCRegister Reg = Op.getReg();
+  // bool isGR16 = MtGMCRegisterClasses[MtG::GR16RegClassID].contains(Reg);
 
-  if (isGR16 && (Kind == MCK_GR8)) {
-    Op.setReg(convertGR16ToGR8(Reg));
-    return Match_Success;
-  }
+  // if (isGR16 && (Kind == MCK_GR8)) {
+  //   Op.setReg(convertGR16ToGR8(Reg));
+  //   return Match_Success;
+  // }
 
   return Match_InvalidOperand;
 }

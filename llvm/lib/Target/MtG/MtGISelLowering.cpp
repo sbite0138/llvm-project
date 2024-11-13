@@ -132,7 +132,6 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<ISD::OutputArg> &Outs,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &dl, SelectionDAG &DAG) const {
-
   MachineFunction &MF = DAG.getMachineFunction();
 
   // CCValAssign - represent the assignment of the return value to a location
@@ -183,7 +182,6 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 
   unsigned Opc = (CallConv == CallingConv::MtG_INTR ? MtGISD::RETI_GLUE
                                                     : MtGISD::RET_GLUE);
-
   RetOps[0] = Chain; // Update chain.
 
   // Add the glue if we have it.
@@ -191,6 +189,14 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     RetOps.push_back(Glue);
 
   return DAG.getNode(Opc, dl, MVT::Other, RetOps);
+}
+
+SDValue MtGTargetLowering::LowerFormalArguments(
+    SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
+
+  return Chain;
 }
 
 const char *MtGTargetLowering::getTargetNodeName(unsigned Opcode) const {

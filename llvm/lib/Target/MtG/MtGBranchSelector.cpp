@@ -226,6 +226,7 @@ bool MtGBSel::expandBranches(OffsetVector &BlockOffsets) {
 }
 
 bool MtGBSel::runOnMachineFunction(MachineFunction &mf) {
+  return false;
   MF = &mf;
   TII = static_cast<const MtGInstrInfo *>(MF->getSubtarget().getInstrInfo());
 

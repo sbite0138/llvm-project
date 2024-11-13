@@ -127,7 +127,7 @@ def jmptarget : Operand<OtherVT> {
 //
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
-  def RETr  : CCRForm<0b00110111, (outs), (ins), "ret",  [(MtGretglue)]> {
+  def RETr  : CCCForm<0b001101110000, (outs), (ins), "ret",  [(MtGretglue)]> {
   }
 }
 

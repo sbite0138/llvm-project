@@ -35,15 +35,15 @@ static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
 
 static std::string computeDataLayout(const Triple &TT, StringRef CPU,
                                      const TargetOptions &Options) {
-  return "e-m:e-p:16:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16";
+  return "e-m:e-p:16:16-i32:16-i32:16-f32:16-f64:16-a:8-n8:16-S16";
 }
 
 MtGTargetMachine::MtGTargetMachine(const Target &T, const Triple &TT,
-                                         StringRef CPU, StringRef FS,
-                                         const TargetOptions &Options,
-                                         std::optional<Reloc::Model> RM,
-                                         std::optional<CodeModel::Model> CM,
-                                         CodeGenOptLevel OL, bool JIT)
+                                   StringRef CPU, StringRef FS,
+                                   const TargetOptions &Options,
+                                   std::optional<Reloc::Model> RM,
+                                   std::optional<CodeModel::Model> CM,
+                                   CodeGenOptLevel OL, bool JIT)
     : LLVMTargetMachine(T, computeDataLayout(TT, CPU, Options), TT, CPU, FS,
                         Options, getEffectiveRelocModel(RM),
                         getEffectiveCodeModel(CM, CodeModel::Small), OL),
@@ -59,7 +59,7 @@ namespace {
 class MtGPassConfig : public TargetPassConfig {
 public:
   MtGPassConfig(MtGTargetMachine &TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {}
+      : TargetPassConfig(TM, PM) {}
 
   MtGTargetMachine &getMtGTargetMachine() const {
     return getTM<MtGTargetMachine>();
@@ -78,8 +78,8 @@ TargetPassConfig *MtGTargetMachine::createPassConfig(PassManagerBase &PM) {
 MachineFunctionInfo *MtGTargetMachine::createMachineFunctionInfo(
     BumpPtrAllocator &Allocator, const Function &F,
     const TargetSubtargetInfo *STI) const {
-  return MtGMachineFunctionInfo::create<MtGMachineFunctionInfo>(Allocator,
-                                                                      F, STI);
+  return MtGMachineFunctionInfo::create<MtGMachineFunctionInfo>(Allocator, F,
+                                                                STI);
 }
 
 void MtGPassConfig::addIRPasses() {
@@ -96,5 +96,5 @@ bool MtGPassConfig::addInstSelector() {
 
 void MtGPassConfig::addPreEmitPass() {
   // Must run branch selection immediately preceding the asm printer.
-  addPass(createMtGBranchSelectionPass());
+  // addPass(createMtGBranchSelectionPass());
 }

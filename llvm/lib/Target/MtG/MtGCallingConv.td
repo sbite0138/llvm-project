@@ -12,21 +12,13 @@
 // MtG Return Value Calling Convention
 //===----------------------------------------------------------------------===//
 def RetCC_MtG : CallingConv<[
-
+  CCIfType<[i32], CCAssignToReg<[R1]>>
 ]>;
 
 //===----------------------------------------------------------------------===//
 // MtG Argument Calling Conventions
 //===----------------------------------------------------------------------===//
 def CC_MtG_AssignStack : CallingConv<[
-  // Pass by value if the byval attribute is given
-  CCIfByVal<CCPassByVal<2, 2>>,
 
-  // Promote i8 arguments to i16.
-  CCIfType<[i8], CCPromoteToType<i16>>,
-
-  // Integer values get stored in stack slots that are 2 bytes in
-  // size and 2-byte aligned.
-  CCIfType<[i16], CCAssignToStack<2, 2>>
 ]>;
 

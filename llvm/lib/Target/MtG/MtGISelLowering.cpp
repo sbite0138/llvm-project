@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/CallingConv.h"
@@ -32,6 +33,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cassert>
 using namespace llvm;
 
 #define DEBUG_TYPE "mtg-lower"
@@ -46,7 +48,7 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
     : TargetLowering(TM) {
 
   // Set up the register classes.
-  addRegisterClass(MVT::i64, &MtG::GRRegClass);
+  addRegisterClass(MVT::i32, &MtG::GRRegClass);
 
   // Compute derived properties from the register classes
   computeRegisterProperties(STI.getRegisterInfo());
@@ -118,14 +120,6 @@ static void AnalyzeReturnValues(CCState &State,
   AnalyzeRetResult(State, Args);
 }
 
-bool MtGTargetLowering::CanLowerReturn(
-    CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
-    const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context) const {
-  SmallVector<CCValAssign, 16> RVLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, Context);
-  return CCInfo.CheckReturn(Outs, RetCC_MtG);
-}
-
 SDValue
 MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,
@@ -133,62 +127,49 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &dl, SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
-
-  // CCValAssign - represent the assignment of the return value to a location
+  // CCValAssign - represent the assignment of the return value
+  // to a location
   SmallVector<CCValAssign, 16> RVLocs;
-
-  // ISRs cannot return any value.
-  if (CallConv == CallingConv::MtG_INTR && !Outs.empty())
-    report_fatal_error("ISRs cannot return any value");
 
   // CCState - Info about the registers and stack slot.
   CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), RVLocs,
                  *DAG.getContext());
 
-  // Analize return values.
-  AnalyzeReturnValues(CCInfo, RVLocs, Outs);
-
-  SDValue Glue;
+  for (unsigned i = 0; i != Outs.size(); ++i) {
+    auto VT = Outs[i].VT;
+    if (VT != MVT::i32) {
+      // print VT type
+      errs() << "VT: " << VT.getScalarType() << '\n';
+    }
+  }
+  CCInfo.AnalyzeReturn(Outs, RetCC_MtG);
+  // SDValue Glue;
+  // SmallVector<SDValue, 4> RetOps(1, Chain);
+  SDValue Flag;
   SmallVector<SDValue, 4> RetOps(1, Chain);
 
   // Copy the result values into the output registers.
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
+    SDValue Val = OutVals[i];
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "Can only return in registers!");
+    assert(RVLocs[i].getValVT() == RVLocs[i].getLocVT() &&
+           "Return value and register value types must match");
 
-    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), OutVals[i], Glue);
+    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Val, Flag);
 
     // Guarantee that all emitted copies are stuck together,
     // avoiding something bad.
-    Glue = Chain.getValue(1);
+    Flag = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
-
-  if (MF.getFunction().hasStructRetAttr()) {
-    MtGMachineFunctionInfo *FuncInfo = MF.getInfo<MtGMachineFunctionInfo>();
-    Register Reg = FuncInfo->getSRetReturnReg();
-
-    if (!Reg)
-      llvm_unreachable("sret virtual register not created in entry block");
-
-    MVT PtrVT = getFrameIndexTy(DAG.getDataLayout());
-    SDValue Val = DAG.getCopyFromReg(Chain, dl, Reg, PtrVT);
-    unsigned R12 = MtG::R12;
-
-    Chain = DAG.getCopyToReg(Chain, dl, R12, Val, Glue);
-    Glue = Chain.getValue(1);
-    RetOps.push_back(DAG.getRegister(R12, PtrVT));
-  }
-
-  unsigned Opc = (CallConv == CallingConv::MtG_INTR ? MtGISD::RETI_GLUE
-                                                    : MtGISD::RET_GLUE);
   RetOps[0] = Chain; // Update chain.
 
   // Add the glue if we have it.
-  if (Glue.getNode())
-    RetOps.push_back(Glue);
+  if (Flag.getNode())
+    RetOps.push_back(Flag);
 
-  return DAG.getNode(Opc, dl, MVT::Other, RetOps);
+  return DAG.getNode(MtGISD::RET_GLUE, dl, MVT::Other, RetOps);
 }
 
 SDValue MtGTargetLowering::LowerFormalArguments(

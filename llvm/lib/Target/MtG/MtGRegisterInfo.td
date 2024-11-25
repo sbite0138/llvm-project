@@ -28,6 +28,6 @@ def GR : RegisterClass<"MtG", [i32], 32,
    (sequence "R%u", 0, 11)>;
 
 def SR : RegisterClass<"MtG", [i32], 32,
-   (add R0)>;
+   (add R0) >;
    
 

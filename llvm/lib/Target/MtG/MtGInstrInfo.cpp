@@ -48,9 +48,43 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                const DebugLoc &DL, MCRegister DestReg,
                                MCRegister SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
-  ;
+
+  BuildMI(MBB, I, DL, get(MtG::MOV), DestReg)
+      .addReg(SrcReg, getKillRegState(KillSrc));
 }
 
+bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  // llvm_unreachable("debug");
+  const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
+  if (MI.getOpcode() == MtG::NUMBUILD_PSEUDO) {
+
+    unsigned Imm = MI.getOperand(1).getImm();
+    std::vector<unsigned> Digits;
+
+    while (Imm > 0) {
+      Digits.push_back(Imm % 12);
+      Imm /= 12;
+    }
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
+        .addDef(MI.getOperand(0).getReg())
+        .addImm(Digits[0]);
+
+    for (unsigned i = 1; i < Digits.size(); i++) {
+      unsigned Digit = Digits[i];
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
+          .addDef(MI.getOperand(0).getReg())
+          .addReg(MtG::R0)
+          .addImm(Digit);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+
+  return false;
+}
 // unsigned MtGInstrInfo::removeBranch(MachineBasicBlock &MBB,
 //                                     int *BytesRemoved) const {
 //   assert(!BytesRemoved && "code size not handled");

@@ -16,6 +16,7 @@
 
 #include "MtG.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
@@ -167,6 +168,7 @@ public:
   //     LowerCall(TargetLowering::CallLoweringInfo &CLI,
   //               SmallVectorImpl<SDValue> &InVals) const override;
 
+  // SDValue LowerConstant(SDValue Op, SelectionDAG &DAG) const;
   // bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
   //                     bool IsVarArg,
   //                     const SmallVectorImpl<ISD::OutputArg> &Outs,

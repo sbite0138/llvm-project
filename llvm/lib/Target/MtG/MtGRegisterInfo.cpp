@@ -44,7 +44,7 @@ MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 
 BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
-  Reserved.set(MtG::R0);
+  // Reserved.set(MtG::R0);
 
   return Reserved;
 }

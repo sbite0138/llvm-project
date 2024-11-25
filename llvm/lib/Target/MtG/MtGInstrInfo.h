@@ -52,7 +52,7 @@ public:
                             int FrameIdx, const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI,
                             Register VReg) const override;
-
+  bool expandPostRAPseudo(MachineInstr &MI) const override;
   // unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
 
   // Branch folding goodness

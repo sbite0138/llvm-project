@@ -11,11 +11,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "MtGISelLowering.h"
+#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
 #include "MtGMachineFunctionInfo.h"
 #include "MtGSubtarget.h"
 #include "MtGTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -49,6 +51,7 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
 
   // Set up the register classes.
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
+  addRegisterClass(MVT::i32, &MtG::SRRegClass);
 
   // Compute derived properties from the register classes
   computeRegisterProperties(STI.getRegisterInfo());
@@ -70,8 +73,8 @@ SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
 
 #include "MtGGenCallingConv.inc"
 
-/// For each argument in a function store the number of pieces it is composed
-/// of.
+/// For each argument in a function store the number of pieces it is
+/// composed of.
 template <typename ArgT>
 static void ParseFunctionArgs(const SmallVectorImpl<ArgT> &Args,
                               SmallVectorImpl<unsigned> &Out) {

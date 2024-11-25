@@ -83,4 +83,6 @@ class CCIForm<bits<8> opcode, dag outs, dag ins, string asmstr, list<dag> patter
 class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
   : MtGInst<outs, ins, asmstr> {
   let Pattern = pattern;
+  //let isCodeGenOnly = true;
+  let isPseudo = true;
 }

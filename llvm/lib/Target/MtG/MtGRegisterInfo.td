@@ -25,7 +25,7 @@ foreach I = 0-12 in
   def R#I  : MtGReg<!add(1,I),  "r"#I>;
 
 def GR : RegisterClass<"MtG", [i32], 32,
-   (sequence "R%u", 0, 11)>;
+   (sequence "R%u", 1, 11)>;
 
 def SR : RegisterClass<"MtG", [i32], 32,
    (add R0) >;

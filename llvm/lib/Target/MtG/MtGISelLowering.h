@@ -81,7 +81,7 @@ public:
   }
 
   MVT::SimpleValueType getCmpLibcallReturnType() const override {
-    return MVT::i16;
+    return MVT::i32;
   }
 
   /// LowerOperation - Provide custom lowering hooks for some operations.

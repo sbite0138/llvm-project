@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MtGInstrInfo.h"
+#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
 #include "MtGMachineFunctionInfo.h"
 #include "MtGTargetMachine.h"
@@ -49,8 +50,8 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                MCRegister SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
 
-  BuildMI(MBB, I, DL, get(MtG::MOV), DestReg)
-      .addReg(SrcReg, getKillRegState(KillSrc));
+  BuildMI(MBB, I, DL, get(MtG::MOV_GG), DestReg)
+      .addUse(SrcReg, getKillRegState(KillSrc));
 }
 
 bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
@@ -76,9 +77,37 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       unsigned Digit = Digits[i];
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
           .addDef(MI.getOperand(0).getReg())
-          .addReg(MtG::R0)
+          .addUse(MI.getOperand(0).getReg(), RegState::Kill)
           .addImm(Digit);
     }
+    MI.eraseFromParent();
+    return true;
+  }
+
+  if (MI.getOpcode() == MtG::MOV_PSEUDO) {
+
+    unsigned Imm = MI.getOperand(1).getImm();
+    std::vector<unsigned> Digits;
+
+    while (Imm > 0) {
+      Digits.push_back(Imm % 12);
+      Imm /= 12;
+    }
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
+        .addDef(MtG::R0)
+        .addImm(Digits[0]);
+
+    for (unsigned i = 1; i < Digits.size(); i++) {
+      unsigned Digit = Digits[i];
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
+          .addDef(MtG::R0)
+          .addUse(MtG::R0, RegState::Kill)
+          .addImm(Digit);
+    }
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOV_GG))
+        .addDef(MI.getOperand(0).getReg())
+        .addUse(MtG::R0);
     MI.eraseFromParent();
     return true;
   }

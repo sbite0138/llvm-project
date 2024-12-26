@@ -31,7 +31,65 @@ MtGFrameLowering::MtGFrameLowering(const MtGSubtarget &STI)
       STI(STI), TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {}
 
 void MtGFrameLowering::emitPrologue(MachineFunction &MF,
-                                    MachineBasicBlock &MBB) const {}
+                                    MachineBasicBlock &MBB) const {
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  const MtGInstrInfo &TII =
+      *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
+  MachineBasicBlock::iterator MBBI = MBB.begin();
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  unsigned SP = MtG::R11;
+  uint64_t StackSize = MFI.getStackSize();
+  if (StackSize == 0 && !MFI.adjustsStack())
+    return;
+  const MCRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
+  unsigned CFIIndex =
+      MF.addFrameInst(MCCFIInstruction::cfiDefCfaOffset(nullptr, -StackSize));
+  BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
+
+  const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
+
+  if (CSI.size()) {
+    for (unsigned i = 0; i < CSI.size(); ++i)
+      ++MBBI;
+    for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
+                                                      E = CSI.end();
+         I != E; ++I) {
+      int64_t Offset = MFI.getObjectOffset(I->getFrameIdx());
+      unsigned Reg = I->getReg();
+      {
+        // Reg is in CPURegs.
+        unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createOffset(
+            nullptr, TRI->getDwarfRegNum(Reg, 1), Offset));
+        BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
+      }
+    }
+  }
+}
 
 void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
-                                    MachineBasicBlock &MBB) const {}
+                                    MachineBasicBlock &MBB) const {
+  // @{ MYRISCVXFrameLowering_emitEpilogue_Impl ...
+  MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+
+  const MtGInstrInfo &TII =
+      *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
+
+  DebugLoc dl = MBBI->getDebugLoc();
+  // @} MYRISCVXFrameLowering_emitEpilogue_Impl ...
+
+  // スタックポインタSPを使用する
+  unsigned SP = MtG::R11;
+
+  // スタックフレームのサイズを取得する
+  uint64_t StackSize = MFI.getStackSize();
+
+  if (!StackSize)
+    return;
+
+  // スタックポインタ(sp)の調整を行う. プラス方向
+  TII.adjustStackPtr(SP, StackSize, MBB, MBBI);
+}

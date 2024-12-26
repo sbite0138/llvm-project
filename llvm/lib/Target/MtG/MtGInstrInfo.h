@@ -71,6 +71,8 @@ public:
   //                       Cond, const DebugLoc &DL, int *BytesAdded = nullptr)
   //                       const override;
 
+  void adjustStackPtr(unsigned SP, int64_t Amount, MachineBasicBlock &MBB,
+                      MachineBasicBlock::iterator I) const;
   int64_t getFramePoppedByCallee(const MachineInstr &I) const {
     assert(isFrameInstr(I) && "Not a frame instruction");
     assert(I.getOperand(1).getImm() >= 0 && "Size must not be negative");

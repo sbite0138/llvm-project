@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
 #include "MtGTargetMachine.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
@@ -389,7 +390,23 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
     Node->setNodeId(-1);
     return;
   }
+  unsigned Opcode = Node->getOpcode();
+  EVT VT = Node->getValueType(0);
 
+  switch (Opcode) {
+  default:
+    break;
+  case ISD::FrameIndex: {
+    SDValue Imm = CurDAG->getTargetConstant(0, dl, MVT::i32);
+    int FI = cast<FrameIndexSDNode>(Node)->getIndex();
+    SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
+    Imm->dump();
+    TFI->dump();
+    ReplaceNode(
+        Node, CurDAG->getMachineNode(MtG::ADD_OR_SUB_PSEUDO, dl, VT, TFI, Imm));
+    return;
+  }
+  }
   // Select the default instruction
   SelectCode(Node);
 }

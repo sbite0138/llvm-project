@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MtGRegisterInfo.h"
+#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
 #include "MtGMachineFunctionInfo.h"
 #include "MtGTargetMachine.h"
@@ -19,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/IR/Function.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -52,7 +54,55 @@ BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                           int SPAdj, unsigned FIOperandNum,
                                           RegScavenger *RS) const {
-  return false;
+  MachineInstr &MI = *II;
+  MachineFunction &MF = *MI.getParent()->getParent();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  auto *TII = MF.getSubtarget().getInstrInfo();
+
+  unsigned i = 0;
+  while (!MI.getOperand(i).isFI()) {
+    ++i;
+    assert(i < MI.getNumOperands() && "Instr doesn't have FrameIndex operand!");
+  }
+  LLVM_DEBUG(errs() << "\nFunction : " << MF.getFunction().getName() << "\n";
+             errs() << "<--------->\n"
+                    << MI);
+  int FrameIndex = MI.getOperand(i).getIndex();
+
+  uint64_t stackSize = MF.getFrameInfo().getStackSize();
+  int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
+  LLVM_DEBUG(errs() << "FrameIndex : " << FrameIndex << "\n"
+                    << "spOffset   : " << spOffset << "\n"
+                    << "stackSize  : " << stackSize << "\n");
+  unsigned FrameReg = MtG::R11;
+
+  int64_t Offset;
+  Offset = spOffset + (int64_t)stackSize;
+  Offset += MI.getOperand(i + 1).getImm();
+  LLVM_DEBUG(errs() << "Offset     : " << Offset << "\n"
+                    << "<--------->\n");
+
+  if (!MI.isDebugValue() && !isInt<12>(Offset)) {
+    assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
+  }
+
+  dbgs() << "[debug] MI: ";
+  MI.dump();
+  dbgs() << "i: " << i << "\n";
+
+  MI.getOperand(i + 0).ChangeToRegister(FrameReg, false);
+  if (Offset < 0) {
+    // MI.setDesc(TII->get(MtG::SUB_PSEUDO));
+    MI.getOperand(i + 1).ChangeToImmediate(Offset);
+
+  } else {
+    // MI.setDesc(TII->get(MtG::ADD_PSEUDO));
+    MI.getOperand(i + 1).ChangeToImmediate(Offset);
+  }
+  // change opcode to ADD_PSEUDO
+
+  dbgs() << "done\n";
+  return true;
 }
 
 Register MtGRegisterInfo::getFrameRegister(const MachineFunction &MF) const {

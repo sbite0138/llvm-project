@@ -24,10 +24,13 @@ class MtGReg<bits<64> num, string n> : Register<n> {
 foreach I = 0-12 in
   def R#I  : MtGReg<!add(1,I),  "r"#I>;
 
+def FLAG : MtGReg<13,"flag">;
+
 def GR : RegisterClass<"MtG", [i32], 32,
    (sequence "R%u", 1, 11)>;
 
 def SR : RegisterClass<"MtG", [i32], 32,
    (add R0) >;
    
-
+def FLAGR :  RegisterClass<"MtG", [i1], 1,
+   (add FLAG) >;

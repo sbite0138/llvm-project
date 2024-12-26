@@ -33,6 +33,11 @@ def simm : Operand<i32>,
   let DecoderMethod = "decodeImmOperand<32>";
 }
 
+def uimm : Operand<i32>,
+            ImmLeaf<i32, [{return isInt<32>(Imm) && Imm > 0;}]> {
+  let DecoderMethod = "decodeImmOperand<32>";
+}
+
 
 //===----------------------------------------------------------------------===//
 //  Control Flow Instructions...
@@ -63,18 +68,37 @@ def MOV_SG : CRRForm<0b0101,
                     []>;
 }
 
+let Constraints = " $dst = $src"  in
+def ADD_PSEUDO : CIIForm<0b0001,
+                    (outs GR:$dst), (ins GR:$src,uimm:$imm2),
+                    "ADD_PSEUDO\t $dst, $src, $imm2",[]>;
+
+
+  let Constraints = " $dst = $src"  in
+  def SUB_PSEUDO : CIIForm<0b0001,
+                      (outs GR:$dst), (ins GR:$src,uimm:$imm2),
+                      "SUB_PSEUDO\t $dst, $src, $imm2",[]>;
+
+  let Constraints = " $dst = $src", Defs = [R0] in
+  def ADD_OR_SUB_PSEUDO : CIIForm<0b0001,
+                      (outs GR:$dst), (ins GR:$src,uimm:$imm2),
+                      "ADD_OR_SUB_PSEUDO\t $dst, $src, $imm2",[]>;
+
+
+let  Defs = [R0] in 
 def NUMBUILD_INIT : CIIForm<0b1010,
                     (outs SR:$rd), (ins simm:$imm),
                     "NUMBUILD\t $rd, $imm",[]>;
 
-let Constraints = " $dst = $src" in
+let Constraints = " $dst = $src" , Defs = [R0] in
 def NUMBUILD_SUCC : CIIForm<0b1010,
                     (outs SR:$dst), (ins SR:$src, simm:$imm),
                     "NUMBUILD\t $dst, $imm",[]>;
-                    
+
+let  Defs = [R0], Uses = [R0] in 
 def NUMBUILD_PSEUDO : Pseudo<(outs SR:$dst), (ins simm:$imm),
                     "DUMMY",[]>;
-
+let  Defs = [R0], Uses = [R0] in 
 def MOV_PSEUDO : Pseudo<(outs GR:$dst), (ins simm:$imm),
                     "MOV_PSEUDO\t$dst,$imm",[(set GR:$dst, simm:$imm)]>;
 
@@ -90,5 +114,4 @@ def load_a: PatFrag<(ops node:$ptr), (load node:$ptr)>;
 def : Pat<(load_a GR:$rs), (LOAD GR:$rs)>;
 def store_a: PatFrag<(ops node:$val, node:$ptr), (store node:$val, node:$ptr)>;
 def : Pat<(store_a GR:$rs0, GR:$rs1), (STORE GR:$rs0, GR:$rs1)>;
-
 

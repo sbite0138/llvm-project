@@ -60,14 +60,25 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   // llvm_unreachable("debug");
   const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
   if (MI.getOpcode() == MtG::NUMBUILD_PSEUDO) {
-
-    unsigned Imm = MI.getOperand(1).getImm();
-    std::vector<unsigned> Digits;
-
-    while (Imm > 0) {
-      Digits.push_back(Imm % 12);
-      Imm /= 12;
+    MI.dump();
+    auto op = MI.getOperand(1);
+    op.dump();
+    auto Imm = MI.getOperand(1).getImm();
+    if (Imm < 0) {
+      dbgs() << "Imm: " << Imm << "\n";
+      Imm += 1ll << 32;
     }
+
+    // assert(Imm > 0);
+    std::vector<unsigned> Digits;
+    if (Imm == 0)
+      Digits.push_back(0);
+    else
+      while (Imm > 0) {
+        Digits.push_back(Imm % 12);
+        Imm /= 12;
+      }
+    std::reverse(Digits.begin(), Digits.end());
 
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
         .addDef(MI.getOperand(0).getReg())
@@ -86,13 +97,22 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   if (MI.getOpcode() == MtG::MOV_PSEUDO) {
 
-    unsigned Imm = MI.getOperand(1).getImm();
-    std::vector<unsigned> Digits;
-
-    while (Imm > 0) {
-      Digits.push_back(Imm % 12);
-      Imm /= 12;
+    auto Imm = MI.getOperand(1).getImm();
+    MI.dump();
+    if (Imm < 0) {
+      dbgs() << "Imm: " << Imm << "\n";
+      Imm += 1ll << 32;
     }
+
+    std::vector<unsigned> Digits;
+    if (Imm == 0)
+      Digits.push_back(0);
+    else
+      while (Imm > 0) {
+        Digits.push_back(Imm % 12);
+        Imm /= 12;
+      }
+    std::reverse(Digits.begin(), Digits.end());
 
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
         .addDef(MtG::R0)
@@ -113,6 +133,16 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   }
 
   return false;
+}
+
+void MtGInstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
+                                  MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator I) const {
+  DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
+  assert(isInt<32>(Amount));
+  dbgs() << "[debug] adjustStackPtr: SP=" << SP << ", Amount=" << Amount
+         << "\n";
+  BuildMI(MBB, I, DL, get(MtG::MOV_PSEUDO), SP).addImm(Amount);
 }
 // unsigned MtGInstrInfo::removeBranch(MachineBasicBlock &MBB,
 //                                     int *BytesRemoved) const {
@@ -238,7 +268,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 //       continue;
 //     }
 
-//     // Handle subsequent conditional branches. Only handle the case where all
+//     // Handle subsequent conditional branches. Only handle the case where
+//     all
 //     // conditional branches branch to the same destination.
 //     assert(Cond.size() == 1);
 //     assert(TBB);

@@ -18,6 +18,7 @@
 #include "MtGTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -180,6 +181,81 @@ SDValue MtGTargetLowering::LowerFormalArguments(
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
 
+  assert(isVarArg == false && "VarArg not supported yet");
+
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MtGMachineFunctionInfo *MtGMFI = MF.getInfo<MtGMachineFunctionInfo>();
+
+  MtGMFI->setVarArgsFrameIndex(0);
+
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
+                 *DAG.getContext());
+  CCInfo.AnalyzeFormalArguments(Ins, CC_MtG_AssignStack);
+
+  Function::const_arg_iterator FuncArg =
+      DAG.getMachineFunction().getFunction().arg_begin();
+
+  std::vector<SDValue> OutChains;
+
+  unsigned CurArgIdx = 0;
+  CCInfo.rewindByValRegsInfo();
+
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    CCValAssign &VA = ArgLocs[i];
+    if (Ins[i].isOrigArg()) {
+      std::advance(FuncArg, Ins[i].getOrigArgIndex() - CurArgIdx);
+      CurArgIdx = Ins[i].getOrigArgIndex();
+    }
+    EVT ValVT = VA.getValVT();
+
+    bool IsRegLoc = VA.isRegLoc();
+
+    if (IsRegLoc) {
+      MVT RegVT = VA.getLocVT();
+      unsigned ArgReg = VA.getLocReg();
+      const TargetRegisterClass *RC = getRegClassFor(RegVT);
+
+      unsigned Reg = MF.getRegInfo().createVirtualRegister(RC);
+      MF.getRegInfo().addLiveIn(ArgReg, Reg);
+
+      SDValue ArgValue = DAG.getCopyFromReg(Chain, dl, Reg, RegVT);
+      if (VA.getLocInfo() != CCValAssign::Full) {
+        unsigned Opcode = 0;
+        if (VA.getLocInfo() == CCValAssign::SExt)
+          Opcode = ISD::AssertSext;
+        else if (VA.getLocInfo() == CCValAssign::ZExt)
+          Opcode = ISD::AssertZext;
+        if (Opcode)
+          ArgValue =
+              DAG.getNode(Opcode, dl, RegVT, ArgValue, DAG.getValueType(ValVT));
+        ArgValue = DAG.getNode(ISD::TRUNCATE, dl, ValVT, ArgValue);
+      }
+      InVals.push_back(ArgValue);
+    } else {
+      MVT LocVT = VA.getLocVT();
+      assert(VA.isMemLoc());
+
+      int FI = MFI.CreateFixedObject(ValVT.getSizeInBits() / 8,
+                                     VA.getLocMemOffset(), true);
+      SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+      SDValue Load = DAG.getLoad(
+          LocVT, dl, Chain, FIN,
+          MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI));
+      InVals.push_back(Load);
+      OutChains.push_back(Load.getValue(1));
+    }
+  }
+
+  // if (isVarArg)
+  //   writeVarArgRegs(OutChains, Chain, DL, DAG, CCInfo);
+  // @} MYRISCVXISelLowering_LowerFormalArguments_IsVarArg
+
+  if (!OutChains.empty()) {
+    OutChains.push_back(Chain);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, OutChains);
+  }
   return Chain;
 }
 

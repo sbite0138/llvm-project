@@ -26,11 +26,21 @@ foreach I = 0-12 in
 
 def FLAG : MtGReg<13,"flag">;
 
-def GR : RegisterClass<"MtG", [i32], 32,
-   (sequence "R%u", 1, 11)>;
-
+// special register
 def SR : RegisterClass<"MtG", [i32], 32,
    (add R0) >;
-   
+
+// general register
+def GR : RegisterClass<"MtG", [i32], 32,
+   (sequence "R%u", 1, 8)>;
+
+// work register
+def WR : RegisterClass<"MtG", [i32], 32,
+   (add R9, R10) >;
+
+// frame register
+def FR : RegisterClass<"MtG", [i32], 32,
+   (add R11) >;
+
 def FLAGR :  RegisterClass<"MtG", [i1], 1,
    (add FLAG) >;

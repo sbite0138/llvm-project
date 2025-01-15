@@ -35,7 +35,7 @@ static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
 
 static std::string computeDataLayout(const Triple &TT, StringRef CPU,
                                      const TargetOptions &Options) {
-  return "e-m:e-p:32:16-i32:16-i32:16-f32:16-f64:16-a:8-n32-S16";
+  return "e-p:32:32-i32:32:32-n32";
 }
 
 MtGTargetMachine::MtGTargetMachine(const Target &T, const Triple &TT,

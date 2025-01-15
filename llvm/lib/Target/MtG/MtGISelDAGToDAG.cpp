@@ -400,8 +400,6 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
     SDValue Imm = CurDAG->getTargetConstant(0, dl, MVT::i32);
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();
     SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
-    Imm->dump();
-    TFI->dump();
     ReplaceNode(
         Node, CurDAG->getMachineNode(MtG::ADD_OR_SUB_PSEUDO, dl, VT, TFI, Imm));
     return;

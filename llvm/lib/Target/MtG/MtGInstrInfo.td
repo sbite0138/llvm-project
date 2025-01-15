@@ -69,20 +69,28 @@ def MOV_SG : CRRForm<0b0101,
 }
 
 let Constraints = " $dst = $src"  in
-def ADD_PSEUDO : CIIForm<0b0001,
-                    (outs GR:$dst), (ins GR:$src,uimm:$imm2),
+def ADD_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,uimm:$imm2),
                     "ADD_PSEUDO\t $dst, $src, $imm2",[]>;
 
+let Constraints = " $dst = $src"  in
+def ADD : CRRForm<0b0001,
+                    (outs GR:$dst), (ins GR:$src,GR:$src2),
+                    "ADD\t $dst, $src, $src2",[(set GR:$dst, (add GR:$src, GR:$src2))]>;
 
-  let Constraints = " $dst = $src"  in
-  def SUB_PSEUDO : CIIForm<0b0001,
-                      (outs GR:$dst), (ins GR:$src,uimm:$imm2),
-                      "SUB_PSEUDO\t $dst, $src, $imm2",[]>;
 
-  let Constraints = " $dst = $src", Defs = [R0] in
-  def ADD_OR_SUB_PSEUDO : CIIForm<0b0001,
-                      (outs GR:$dst), (ins GR:$src,uimm:$imm2),
-                      "ADD_OR_SUB_PSEUDO\t $dst, $src, $imm2",[]>;
+let Constraints = " $dst = $src"  in
+def SUB_PSEUDO : Pseudo<
+                    (outs GR:$dst), (ins GR:$src,uimm:$imm2),
+                    "SUB_PSEUDO\t $dst, $src, $imm2",[]>;
+let Constraints = " $dst = $src"  in
+def SUB : CRRForm<0b0001,
+                    (outs GR:$dst), (ins GR:$src,GR:$src2),
+                    "SUB\t $dst, $src, $src2",[]>;
+
+let Constraints = "$dst = $src", Defs = [R0] in
+def ADD_OR_SUB_PSEUDO : Pseudo<
+                    (outs GR:$dst), (ins GR:$src,uimm:$imm2),
+                    "ADD_OR_SUB_PSEUDO\t $dst, $src, $imm2",[]>;
 
 
 let  Defs = [R0] in 
@@ -100,7 +108,7 @@ def NUMBUILD_PSEUDO : Pseudo<(outs SR:$dst), (ins simm:$imm),
                     "DUMMY",[]>;
 let  Defs = [R0], Uses = [R0] in 
 def MOV_PSEUDO : Pseudo<(outs GR:$dst), (ins simm:$imm),
-                    "MOV_PSEUDO\t$dst,$imm",[(set GR:$dst, simm:$imm)]>;
+                    "MOV_PSEUDO\t$dst,$imm",[]>;
 
 def LOAD : CRRForm<0b1001,
                     (outs GR:$dst), (ins GR:$src),
@@ -109,6 +117,10 @@ def LOAD : CRRForm<0b1001,
 def STORE : CRRForm<0b1000,
                     (outs), (ins GR:$src0, GR:$src1),
                     "STORE\t $src0, $src1",[]>;
+let Constraints = "$dwork = $swork", Defs = [R0], Uses = [R0, R11] in 
+def CALC_FI_PSEUDO : Pseudo<
+                    (outs GR:$dwork), (ins GR:$swork),
+                    "CALC_FI",[]>;
 
 def load_a: PatFrag<(ops node:$ptr), (load node:$ptr)>;
 def : Pat<(load_a GR:$rs), (LOAD GR:$rs)>;

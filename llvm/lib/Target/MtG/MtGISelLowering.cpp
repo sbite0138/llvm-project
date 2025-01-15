@@ -53,6 +53,8 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   // Set up the register classes.
   addRegisterClass(MVT::i32, &MtG::SRRegClass);
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
+  addRegisterClass(MVT::i32, &MtG::WRRegClass);
+  addRegisterClass(MVT::i32, &MtG::FRRegClass);
 
   // Compute derived properties from the register classes
   computeRegisterProperties(STI.getRegisterInfo());

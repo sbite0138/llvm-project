@@ -70,27 +70,27 @@ def MOV_SG : CRRForm<0b0101,
 
 let Constraints = " $dst = $src"  in
 def ADD_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,uimm:$imm2),
-                    "ADD_PSEUDO\t $dst, $src, $imm2",[]>;
+                    "ADD_PSEUDO\t $dst, $imm2",[]>;
 
 let Constraints = " $dst = $src"  in
 def ADD : CRRForm<0b0001,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
-                    "ADD\t $dst, $src, $src2",[(set GR:$dst, (add GR:$src, GR:$src2))]>;
+                    "ADD\t $dst, $src2",[(set GR:$dst, (add GR:$src, GR:$src2))]>;
 
 
 let Constraints = " $dst = $src"  in
 def SUB_PSEUDO : Pseudo<
                     (outs GR:$dst), (ins GR:$src,uimm:$imm2),
-                    "SUB_PSEUDO\t $dst, $src, $imm2",[]>;
+                    "SUB_PSEUDO\t $dst, $imm2",[]>;
 let Constraints = " $dst = $src"  in
 def SUB : CRRForm<0b0001,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
-                    "SUB\t $dst, $src, $src2",[]>;
+                    "SUB\t $dst, $src2",[]>;
 
 let Constraints = "$dst = $src", Defs = [R0] in
 def ADD_OR_SUB_PSEUDO : Pseudo<
                     (outs GR:$dst), (ins GR:$src,uimm:$imm2),
-                    "ADD_OR_SUB_PSEUDO\t $dst, $src, $imm2",[]>;
+                    "ADD_OR_SUB_PSEUDO\t $dst, $imm2",[]>;
 
 
 let  Defs = [R0] in 

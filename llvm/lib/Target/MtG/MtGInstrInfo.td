@@ -66,6 +66,26 @@ def MOV_SG : CRRForm<0b0101,
                     (outs SR:$rd), (ins GR:$rs),
                     "MOV $rd, $rs",
                     []>;
+let Uses = [R9] in 
+def MOV_GW1 : CRRForm<0b0101,
+                    (outs GR:$rd), (ins),
+                    "MOV $rd, r9",
+                    []>;
+let Uses = [R10] in 
+def MOV_GW2 : CRRForm<0b0101,
+                    (outs GR:$rd), (ins),
+                    "MOV $rd, r10",
+                    []>;
+let Defs = [R9] in 
+def MOV_W1G : CRRForm<0b0101,
+                    (outs), (ins GR:$rd),
+                    "MOV  r9, $rd",
+                    []>;
+let Defs = [R10] in 
+def MOV_W2G : CRRForm<0b0101,
+                    (outs), (ins GR:$rd),
+                    "MOV  r10, $rd",
+                    []>;
 }
 
 let Constraints = " $dst = $src"  in

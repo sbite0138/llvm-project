@@ -53,14 +53,13 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   // Set up the register classes.
   addRegisterClass(MVT::i32, &MtG::SRRegClass);
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
-  addRegisterClass(MVT::i32, &MtG::WRRegClass);
-  addRegisterClass(MVT::i32, &MtG::FRRegClass);
+  // addRegisterClass(MVT::i32, &MtG::WRRegClass);  addRegisterClass(MVT::i16, &MtG::FRRegClass);
 
   // Compute derived properties from the register classes
   computeRegisterProperties(STI.getRegisterInfo());
 
   // Provide all sorts of operation actions
-  setStackPointerRegisterToSaveRestore(MtG::R11);
+  setStackPointerRegisterToSaveRestore(MtG::R8);
 }
 
 SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {

@@ -14,6 +14,7 @@
 #include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
 #include "MtGMachineFunctionInfo.h"
+#include "MtGRegisterInfo.h"
 #include "MtGTargetMachine.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -24,6 +25,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <cassert>
 #include <cstdlib>
 
 using namespace llvm;
@@ -44,23 +46,19 @@ void MtGInstrInfo::storeRegToStackSlot(
   // check RC is GRRegClass
   // assert(RC == &MtG::GRRegClass && "Can only store GRRegClass to stack
   // slot");
-  auto TmpReg1 = MtG::R9;
-  auto TmpReg2 = MtG::R10;
+  // auto TmpReg2 = MtG::R10;
 
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_GG), TmpReg1)
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_W1G))
       .addUse(MtG::R0);
 
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::CALC_FI_PSEUDO))
-      .addDef(TmpReg2)
-      .addFrameIndex(FrameIdx)
-      .addUse(TmpReg2);
-
+      .addFrameIndex(FrameIdx);
+    
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STORE))
       .addUse(SrcReg)
       .addUse(MtG::R0);
 
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_GG), MtG::R0)
-      .addUse(TmpReg1);
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_GW1), MtG::R0);
 }
 
 void MtGInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
@@ -92,7 +90,6 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                const DebugLoc &DL, MCRegister DestReg,
                                MCRegister SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
-
   BuildMI(MBB, I, DL, get(MtG::MOV_GG), DestReg)
       .addUse(SrcReg, getKillRegState(KillSrc));
 }
@@ -226,5 +223,5 @@ void MtGInstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
   assert(isInt<32>(Amount));
   BuildMI(MBB, I, DL, get(MtG::ADD_OR_SUB_PSEUDO), SP)
       .addUse(SP)
-      .addImm(Amount / 4);
+      .addImm(Amount );
 }

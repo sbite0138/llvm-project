@@ -42,7 +42,9 @@ def parse(line:str):
 def execute(insts, memoryMap, registerMap):
     pc=0
     while pc<len(insts):
+        print("--------------------")
         print(registerMap)
+        print(memoryMap)
 
         inst=insts[pc]
         print(f"line {pc}: {inst.opcode} {inst.op1} {inst.op2}",end=" ")
@@ -109,18 +111,19 @@ def main():
     print(insts)
     memoryMap=defaultdict(lambda:None)
     registerMap=defaultdict(lambda:None)
-    registerMap['r1']=2**0
-    registerMap['r2']=2**1
-    registerMap['r3']=2**2
-    registerMap['r4']=2**3
-    registerMap['r5']=2**4
-    registerMap['r6']=2**5
-    registerMap['r7']=2**6
-    registerMap['r8']=2**7
-    registerMap['r11']=13
-    for i in range(13,26):
-        memoryMap[i]=1
+    registerMap['r1']=10**0
+    registerMap['r2']=10**1
+    registerMap['r3']=10**2
+    registerMap['r4']=10**3
+    registerMap['r5']=10**4
+    registerMap['r6']=10**5
+    registerMap['r7']=10**6
+    registerMap['r8']=12
+    registerMap['r11']=0
+    memoryMap[12]=10**7
+    memoryMap[16]=10**8
+    # memoryMap[28]=10**9
     execute(insts,memoryMap,registerMap)
     print(registerMap)
-
-main()
+    print(memoryMap)
+main() 

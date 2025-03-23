@@ -488,8 +488,9 @@ MachineRegisterInfo::EmitLiveInCopies(MachineBasicBlock *EntryMBB,
         // complicated by the debug info code for arguments.
         LiveIns.erase(LiveIns.begin() + i);
         --i; --e;
-      } else {
+      } else { 
         // Emit a copy.
+        // checks same regclass
         BuildMI(*EntryMBB, EntryMBB->begin(), DebugLoc(),
                 TII.get(TargetOpcode::COPY), LiveIns[i].second)
           .addReg(LiveIns[i].first);

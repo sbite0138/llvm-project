@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MtGFrameLowering.h"
+#include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtGInstrInfo.h"
 #include "MtGMachineFunctionInfo.h"
 #include "MtGSubtarget.h"
@@ -26,8 +27,8 @@
 using namespace llvm;
 
 MtGFrameLowering::MtGFrameLowering(const MtGSubtarget &STI)
-    : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, Align(2), -2,
-                          Align(2)),
+    : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, Align(4), 0,
+                          Align(4)),
       STI(STI), TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {}
 
 void MtGFrameLowering::emitPrologue(MachineFunction &MF,
@@ -35,12 +36,14 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
   MachineFrameInfo &MFI = MF.getFrameInfo();
   const MtGInstrInfo &TII =
       *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
+      MFI.dump(MF);
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
-  unsigned SP = MtG::R11;
+  unsigned SP = MtG::R8;
   uint64_t StackSize = MFI.getStackSize();
   if (StackSize == 0 && !MFI.adjustsStack())
     return;
+  dbgs()<<"[emitPrologue] StackSize: "<<StackSize<<"\n";
   const MCRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
   unsigned CFIIndex =
@@ -49,7 +52,7 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
       .addCFIIndex(CFIIndex);
 
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
-
+                            
   if (CSI.size()) {
     for (unsigned i = 0; i < CSI.size(); ++i)
       ++MBBI;
@@ -71,7 +74,6 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
 
 void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
-  // @{ MYRISCVXFrameLowering_emitEpilogue_Impl ...
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   MachineFrameInfo &MFI = MF.getFrameInfo();
 
@@ -79,17 +81,11 @@ void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
       *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
 
   DebugLoc dl = MBBI->getDebugLoc();
-  // @} MYRISCVXFrameLowering_emitEpilogue_Impl ...
-
-  // スタックポインタSPを使用する
-  unsigned SP = MtG::R11;
-
-  // スタックフレームのサイズを取得する
+  unsigned SP = MtG::R8;
   uint64_t StackSize = MFI.getStackSize();
 
   if (!StackSize)
     return;
 
-  // スタックポインタ(sp)の調整を行う. プラス方向
   TII.adjustStackPtr(SP, StackSize, MBB, MBBI);
 }

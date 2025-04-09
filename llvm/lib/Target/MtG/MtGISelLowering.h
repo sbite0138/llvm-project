@@ -26,7 +26,6 @@ enum NodeType : unsigned {
 
   /// Return with a glue operand. Operand 0 is the chain operand.
   RET_GLUE,
-  SLT_GLUE,
 
   /// Same as RET_GLUE, but used for returning from ISRs.
   RETI_GLUE,

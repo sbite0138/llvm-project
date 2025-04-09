@@ -396,6 +396,9 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
   switch (Opcode) {
   default:
     break;
+  case MtG::SLT_PSEUDO: {
+    llvm_unreachable("MtG::SLT_PSEUDO");
+  }
   case ISD::FrameIndex: {
     SDValue Imm = CurDAG->getTargetConstant(0, dl, MVT::i32);
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();

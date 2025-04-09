@@ -26,6 +26,7 @@ enum NodeType : unsigned {
 
   /// Return with a glue operand. Operand 0 is the chain operand.
   RET_GLUE,
+  SLT_GLUE,
 
   /// Same as RET_GLUE, but used for returning from ISRs.
   RETI_GLUE,
@@ -104,7 +105,7 @@ public:
   // SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   // SDValue getReturnAddressFrameIndex(SelectionDAG &DAG) const;
-
+  bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
   // TargetLowering::ConstraintType
   // getConstraintType(StringRef Constraint) const override;
   // std::pair<unsigned, const TargetRegisterClass *>
@@ -131,11 +132,11 @@ public:
   //   bool isLegalICmpImmediate(int64_t) const override;
   //   bool shouldAvoidTransformToShift(EVT VT, unsigned Amount) const override;
 
-  //   MachineBasicBlock *
-  //   EmitInstrWithCustomInserter(MachineInstr &MI,
-  //                               MachineBasicBlock *BB) const override;
-  //   MachineBasicBlock *EmitShiftInstr(MachineInstr &MI,
-  //                                     MachineBasicBlock *BB) const;
+  MachineBasicBlock *
+  EmitInstrWithCustomInserter(MachineInstr &MI,
+                              MachineBasicBlock *BB) const override;
+  // MachineBasicBlock *EmitShiftInstr(MachineInstr &MI,
+  //                                   MachineBasicBlock *BB) const;
 
   // private:
   //   SDValue LowerCCCCallTo(SDValue Chain, SDValue Callee,

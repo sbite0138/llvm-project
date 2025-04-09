@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/CallingConv.h"
@@ -53,13 +54,18 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   // Set up the register classes.
   addRegisterClass(MVT::i32, &MtG::SRRegClass);
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
-  // addRegisterClass(MVT::i32, &MtG::WRRegClass);  addRegisterClass(MVT::i16, &MtG::FRRegClass);
+  // addRegisterClass(MVT::i32, &MtG::WRRegClass);  addRegisterClass(MVT::i16,
+  // &MtG::FRRegClass);
 
   // Compute derived properties from the register classes
   computeRegisterProperties(STI.getRegisterInfo());
 
   // Provide all sorts of operation actions
   setStackPointerRegisterToSaveRestore(MtG::R8);
+  // setOperationAction(ISD::SDIV, MVT::i32, Custom);
+}
+bool MtGTargetLowering::isIntDivCheap(EVT VT, AttributeList Attr) const {
+  return true;
 }
 
 SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
@@ -292,4 +298,28 @@ const char *MtGTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "MtGISD::DADD";
   }
   return nullptr;
+}
+
+MachineBasicBlock *
+MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                               MachineBasicBlock *BB) const {
+  switch (MI.getOpcode()) {
+  default:
+    llvm_unreachable("unimplemented custom inserter");
+  case MtG::SLT_PSEUDO: {
+    // This is a pseudo instruction that needs to be replaced with a
+    // sequence of instructions.
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    const TargetRegisterClass *RC = getRegClassFor(MVT::i32);
+    // create a new register
+    unsigned Reg = MF.getRegInfo().createVirtualRegister(RC);
+    BuildMI(*BB, MI, DL, TII.get(MtG::NUMBUILD_PSEUDO), Reg).addImm(12 * 12);
+    MI.eraseFromParent(); // The pseudo instruction is gone now.
+    return BB;
+  }
+  }
+  return BB;
 }

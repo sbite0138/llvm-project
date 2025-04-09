@@ -184,6 +184,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
     auto Imm = MI.getOperand(1).getImm();
     assert(Imm >= 0);
+    MI.dump();
+    llvm::dbgs() << "MOV_PSEUDO Imm: " << Imm << "\n";
 
     std::vector<unsigned> Digits;
     if (Imm == 0)

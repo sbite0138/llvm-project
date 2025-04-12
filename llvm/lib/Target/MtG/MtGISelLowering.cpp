@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -306,18 +307,102 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   switch (MI.getOpcode()) {
   default:
     llvm_unreachable("unimplemented custom inserter");
-  case MtG::SLT_PSEUDO: {
-    // This is a pseudo instruction that needs to be replaced with a
-    // sequence of instructions.
+  case MtG::AND_PSEUDO: {
     DebugLoc DL = MI.getDebugLoc();
     MachineFunction &MF = *BB->getParent();
     const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
     const TargetInstrInfo &TII = *STI.getInstrInfo();
-    const TargetRegisterClass *RC = getRegClassFor(MVT::i32);
-    // create a new register
-    unsigned Reg = MF.getRegInfo().createVirtualRegister(RC);
-    BuildMI(*BB, MI, DL, TII.get(MtG::NUMBUILD_PSEUDO), Reg).addImm(12 * 12);
-    MI.eraseFromParent(); // The pseudo instruction is gone now.
+    const size_t BitWidth = 32;
+    Register DstReg = MI.getOperand(0).getReg();
+    Register SrcReg1 = MI.getOperand(1).getReg();
+    Register SrcReg2 = MI.getOperand(2).getReg();
+    Register LoopReg = MF.getRegInfo().createVirtualRegister(&MtG::GRRegClass);
+    Register TempSrcReg1 =
+        MF.getRegInfo().createVirtualRegister(&MtG::GRRegClass);
+    BuildMI(*BB, MI, DL, TII.get(MtG::MOV_GG), TempSrcReg1).addReg(SrcReg1);
+
+    BuildMI(*BB, MI, DL, TII.get(MtG::NUMBUILD_PSEUDO), LoopReg)
+        .addImm(BitWidth);
+    BuildMI(*BB, MI, DL, TII.get(MtG::ZERO), DstReg);
+    // Fix the TempSrcReg1 to be SSA.
+    BuildMI(*BB, MI, DL, TII.get(MtG::HALVE), TempSrcReg1)
+        .addUse(TempSrcReg1, RegState::Kill);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), MtG::R9);
+
+    BuildMI(*BB, MI, DL, TII.get(MtG::HALVE), SrcReg2).addUse(SrcReg2);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), MtG::R10);
+
+    BuildMI(*BB, MI, DL, TII.get(MtG::MUL), MtG::R9)
+        .addUse(MtG::R9)
+        .addUse(MtG::R10);
+    BuildMI(*BB, MI, DL, TII.get(MtG::ADD), DstReg)
+        .addUse(DstReg)
+        .addUse(DstReg);
+    BuildMI(*BB, MI, DL, TII.get(MtG::ADD), DstReg)
+        .addUse(DstReg)
+        .addUse(MtG::R9);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SUB1COND), LoopReg).addUse(LoopReg);
+
+    BuildMI(*BB, MI, DL, TII.get(MtG::JUMPBWDF_IMM), LoopReg).addImm(8);
+
+    MI.eraseFromParent();
+    return BB;
+  }
+
+  case MtG::SLT_PSEUDO: {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    unsigned DstReg = MI.getOperand(0).getReg();
+    unsigned SrcReg1 = MI.getOperand(1).getReg();
+    unsigned SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg1).addUse(SrcReg2);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+    return BB;
+  }
+  case MtG::SGT_PSEUDO: {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    unsigned DstReg = MI.getOperand(0).getReg();
+    unsigned SrcReg1 = MI.getOperand(1).getReg();
+    unsigned SrcReg2 = MI.getOperand(2).getReg();
+    auto MIB = BuildMI(*BB, MI, DL, TII.get(MtG::SLT_PSEUDO), DstReg)
+                   .addUse(SrcReg2)
+                   .addUse(SrcReg1);
+    EmitInstrWithCustomInserter(*MIB.getInstr(), BB);
+    MI.eraseFromParent();
+    return BB;
+  }
+  case MtG::SNEQ_PSEUDO: {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    Register DstReg = MI.getOperand(0).getReg();
+    Register SrcReg1 = MI.getOperand(1).getReg();
+    Register SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg1).addUse(SrcReg2);
+    BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg2).addUse(SrcReg1);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+    return BB;
+  }
+  case MtG::SEQ_PSEUDO: {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    Register DstReg = MI.getOperand(0).getReg();
+    Register SrcReg1 = MI.getOperand(1).getReg();
+    Register SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg1).addUse(SrcReg2);
+    BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg2).addUse(SrcReg1);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
     return BB;
   }
   }

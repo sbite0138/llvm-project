@@ -53,37 +53,37 @@ let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in
 let isMoveReg = true in {
 def MOV_GG : CRRForm<0b0101,
                     (outs GR:$rd), (ins GR:$rs),
-                    "MOV $rd, $rs",
+                    "Mov $rd, $rs",
                     []>;
 
 def MOV_GS : CRRForm<0b0101,
                     (outs GR:$rd), (ins SR:$rs),
-                    "MOV $rd, $rs",
+                    "Mov $rd, $rs",
                     []>;
 
 def MOV_SG : CRRForm<0b0101,
                     (outs SR:$rd), (ins GR:$rs),
-                    "MOV $rd, $rs",
+                    "Mov $rd, $rs",
                     []>;
 let Uses = [R9] in 
 def MOV_GW1 : CRRForm<0b0101,
                     (outs GR:$rd), (ins),
-                    "MOV $rd, r9",
+                    "Mov $rd, r9",
                     []>;
 let Uses = [R10] in 
 def MOV_GW2 : CRRForm<0b0101,
                     (outs GR:$rd), (ins),
-                    "MOV $rd, r10",
+                    "Mov $rd, r10",
                     []>;
 let Defs = [R9] in 
 def MOV_W1G : CRRForm<0b0101,
                     (outs), (ins GR:$rd),
-                    "MOV  r9, $rd",
+                    "Mov  r9, $rd",
                     []>;
 let Defs = [R10] in 
 def MOV_W2G : CRRForm<0b0101,
                     (outs), (ins GR:$rd),
-                    "MOV  r10, $rd",
+                    "Mov  r10, $rd",
                     []>;
 }
 
@@ -94,26 +94,49 @@ def ADD_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,uimm:$imm2),
 let Constraints = " $dst = $src"  in
 def ADD : CRRForm<0b0001,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
-                    "ADD\t $dst, $src2",[(set GR:$dst, (add GR:$src, GR:$src2))]>;
+                    "Add\t $dst, $src2",[(set GR:$dst, (add GR:$src, GR:$src2))]>;
 
 let Constraints = " $dst = $src"  in
 def MUL : CRRForm<0b0010,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
-                    "MUL\t $dst, $src2",[(set GR:$dst, (mul GR:$src, GR:$src2))]>;
+                    "Mul\t $dst, $src2",[(set GR:$dst, (mul GR:$src, GR:$src2))]>;
 
 let Constraints = " $dst = $src", Defs = [R9, R10] in
 def DIV_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,GR:$src2),
                     "DIV_PSEUDO\t $dst, $src2",[(set GR:$dst, (sdiv GR:$src, GR:$src2))]>;
 
-let Constraints = " $dst = $src1", Defs = [R9, R10] in
+let  Defs = [FLAG, R9, R10] in
 def SLT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
                     "SLT_PSEUDO\t $dst, $src2",[(set GR:$dst, (setlt GR:$src1, GR:$src2))]>{
                       let usesCustomInserter =1;
                     }
 
-let Constraints = " $dst = $src1", Defs = [R9, R10] in
+let  Defs = [FLAG, R9, R10] in
+def SGT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
+                    "SGT_PSEUDO\t $dst, $src2",[(set GR:$dst, (setgt GR:$src1, GR:$src2))]>{
+                      let usesCustomInserter =1;
+                    }
+
+
+                    let  Defs = [FLAG, R9, R10] in
+
+let  Defs = [FLAG, R9, R10] in
+def SEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
+                    "SEQ_PSEUDO\t $dst, $src2",[(set GR:$dst, (seteq GR:$src1, GR:$src2))]>{
+                      let usesCustomInserter =1;
+                    }
+
+let  Defs = [FLAG, R9, R10] in
+def SNEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
+                    "SNEQ_PSEUDO\t $dst, $src2",[(set GR:$dst, (setne GR:$src1, GR:$src2))]>{
+                      let usesCustomInserter =1;
+                    }
+
+let Constraints  = "$dst = $src1", Defs = [R9, R10] in
 def AND_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
-                    "AND_PSEUDO\t $dst, $src2",[(set GR:$dst, (and GR:$src1, GR:$src2))]>;
+                    "AND_PSEUDO\t $dst, $src2",[(set GR:$dst, (and GR:$src1, GR:$src2))]>{
+                      let usesCustomInserter =1;
+                    }
 
 let Constraints = " $dst = $src"  in
 def SUB_PSEUDO : Pseudo<
@@ -122,7 +145,7 @@ def SUB_PSEUDO : Pseudo<
 let Constraints = " $dst = $src"  in
 def SUB : CRRForm<0b0001,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
-                    "SUB\t $dst, $src2",[]>;
+                    "Sub\t $dst, $src2",[]>;
 
 let Constraints = "$dst = $src", Defs = [R0] in
 def ADD_OR_SUB_PSEUDO : Pseudo<
@@ -133,12 +156,12 @@ def ADD_OR_SUB_PSEUDO : Pseudo<
 let  Defs = [R0] in 
 def NUMBUILD_INIT : CIIForm<0b1010,
                     (outs SR:$rd), (ins simm:$imm),
-                    "NUMBUILD\t $rd, $imm",[]>;
+                    "NumBuild\t $rd, $imm",[]>;
 
 let Constraints = " $dst = $src" , Defs = [R0] in
 def NUMBUILD_SUCC : CIIForm<0b1010,
                     (outs SR:$dst), (ins SR:$src, simm:$imm),
-                    "NUMBUILD\t $dst, $imm",[]>;
+                    "NumBuild\t $dst, $imm",[]>;
 
 let  Defs = [R0], Uses = [R0] in 
 def NUMBUILD_PSEUDO : Pseudo<(outs SR:$dst), (ins simm:$imm),
@@ -149,35 +172,54 @@ def MOV_PSEUDO : Pseudo<(outs GR:$dst), (ins simm:$imm),
 
 def LOAD : CRRForm<0b1001,
                     (outs GR:$dst), (ins GR:$src),
-                    "LOAD\t $dst, $src",[]>;
+                    "Load\t $dst, $src",[]>;
 
 def STORE : CRRForm<0b1000,
                     (outs), (ins GR:$src0, GR:$src1),
-                    "STORE\t $src0, $src1",[]>;
+                    "Store\t $src0, $src1",[]>;
 
 let  Defs = [FLAG] in 
 def FLESS : CRRForm<0b1011,
                     (outs), (ins GR:$src0, GR:$src1),
-                    "FLESS\t $src0, $src1",[]>;
+                    "FLess\t $src0, $src1",[]>;
 
 let  Defs = [FLAG] in
 def FISZERO : CRRForm<0b1011,
                     (outs), (ins GR:$src0),
-                    "FISZERO\t $src0, $src0",[]>;
+                    "FIsZero\t $src0, $src0",[]>;
 
-let  Defs = [FLAG] in
+let Constraints = "$dst = $src", Defs = [FLAG] in
 def HALVE : CCRForm<0b01000010,
-                    (outs), (ins GR:$src0),
-                    "HALVE\t $src0",[]>;
-let  Defs = [FLAG] in
+                    (outs GR:$dst), (ins GR:$src),
+                    "Halve\t $src",[]>;
+
+let Uses = [FLAG] in
 def SETF : CCRForm<0b00100010,
                     (outs), (ins GR:$src0),
-                    "SETF\t $src0",[]>;
+                    "SetF\t $src0",[]>;
 
-let  Defs = [FLAG] in
+let  Uses = [FLAG] in
 def SETNF : CCRForm<0b00100011,
                     (outs), (ins GR:$src0),
-                    "SETF\t $src0",[]>;
+                    "SetNF\t $src0",[]>;
+
+
+def ZERO : CCRForm<0b00000101,
+                    (outs GR:$dst), (ins),
+                    "Zero\t $dst",[]>;
+
+let Uses = [FLAG]  in     
+def JUMPBWDF_IMM : CCIForm<0b00111001,
+                    (outs), (ins simm:$imm),
+                    "JumpBwdF\t $imm",[]>;
+
+
+let Constraints = "$dst = $src" ,  Uses = [FLAG] in
+def SUB1COND : CCRForm<0b00100011,
+                    (outs GR:$dst), (ins GR:$src),
+                    "Sub1Cond\t $src",[]>;
+
+
 
 let Constraints = "$dwork = $swork", Defs = [R0], Uses = [R0, R11] in 
 def CALC_FI_PSEUDO : Pseudo<

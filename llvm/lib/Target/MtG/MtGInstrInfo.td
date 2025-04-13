@@ -118,8 +118,6 @@ def SGT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
                     }
 
 
-                    let  Defs = [FLAG, R9, R10] in
-
 let  Defs = [FLAG, R9, R10] in
 def SEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
                     "SEQ_PSEUDO\t $dst, $src2",[(set GR:$dst, (seteq GR:$src1, GR:$src2))]>{
@@ -133,8 +131,8 @@ def SNEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
                     }
 
 let Constraints  = "$dst = $src1", Defs = [R9, R10] in
-def AND_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
-                    "AND_PSEUDO\t $dst, $src2",[(set GR:$dst, (and GR:$src1, GR:$src2))]>{
+def LSB_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1),
+                    "LSB_PSEUDO\t $dst",[(set GR:$dst, (and GR:$src1, 1))]>{
                       let usesCustomInserter =1;
                     }
 

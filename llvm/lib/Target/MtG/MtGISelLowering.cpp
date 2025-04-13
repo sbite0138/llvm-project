@@ -307,44 +307,16 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   switch (MI.getOpcode()) {
   default:
     llvm_unreachable("unimplemented custom inserter");
-  case MtG::AND_PSEUDO: {
+  case MtG::LSB_PSEUDO: {
     DebugLoc DL = MI.getDebugLoc();
     MachineFunction &MF = *BB->getParent();
     const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
     const TargetInstrInfo &TII = *STI.getInstrInfo();
-    const size_t BitWidth = 32;
     Register DstReg = MI.getOperand(0).getReg();
-    Register SrcReg1 = MI.getOperand(1).getReg();
-    Register SrcReg2 = MI.getOperand(2).getReg();
-    Register LoopReg = MF.getRegInfo().createVirtualRegister(&MtG::GRRegClass);
-    Register TempSrcReg1 =
-        MF.getRegInfo().createVirtualRegister(&MtG::GRRegClass);
-    BuildMI(*BB, MI, DL, TII.get(MtG::MOV_GG), TempSrcReg1).addReg(SrcReg1);
-
-    BuildMI(*BB, MI, DL, TII.get(MtG::NUMBUILD_PSEUDO), LoopReg)
-        .addImm(BitWidth);
-    BuildMI(*BB, MI, DL, TII.get(MtG::ZERO), DstReg);
-    // Fix the TempSrcReg1 to be SSA.
-    BuildMI(*BB, MI, DL, TII.get(MtG::HALVE), TempSrcReg1)
-        .addUse(TempSrcReg1, RegState::Kill);
-    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), MtG::R9);
-
-    BuildMI(*BB, MI, DL, TII.get(MtG::HALVE), SrcReg2).addUse(SrcReg2);
-    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), MtG::R10);
-
-    BuildMI(*BB, MI, DL, TII.get(MtG::MUL), MtG::R9)
-        .addUse(MtG::R9)
-        .addUse(MtG::R10);
-    BuildMI(*BB, MI, DL, TII.get(MtG::ADD), DstReg)
-        .addUse(DstReg)
-        .addUse(DstReg);
-    BuildMI(*BB, MI, DL, TII.get(MtG::ADD), DstReg)
-        .addUse(DstReg)
-        .addUse(MtG::R9);
-    BuildMI(*BB, MI, DL, TII.get(MtG::SUB1COND), LoopReg).addUse(LoopReg);
-
-    BuildMI(*BB, MI, DL, TII.get(MtG::JUMPBWDF_IMM), LoopReg).addImm(8);
-
+    Register SrcReg = MI.getOperand(1).getReg();
+    Register TmpReg = MF.getRegInfo().createVirtualRegister(&MtG::GRRegClass);
+    BuildMI(*BB, MI, DL, TII.get(MtG::HALVE), TmpReg).addUse(SrcReg);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
     return BB;
   }
@@ -408,3 +380,9 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   }
   return BB;
 }
+
+// SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
+//                                               SelectionDAG &DAG) const {
+//   SDLoc DL(Op);
+//   EVT Ty
+// }

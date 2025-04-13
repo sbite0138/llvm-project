@@ -130,6 +130,20 @@ def SNEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
                       let usesCustomInserter =1;
                     }
 
+
+let  Defs = [FLAG, R9, R10] in
+def SGEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
+                    "SNEQ_PSEUDO\t $dst, $src2",[(set GR:$dst, (setge GR:$src1, GR:$src2))]>{
+                      let usesCustomInserter =1;
+                    }
+
+let  Defs = [FLAG, R9, R10] in
+def SLEQ_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
+                    "SNEQ_PSEUDO\t $dst, $src2",[(set GR:$dst, (setle GR:$src1, GR:$src2))]>{
+                      let usesCustomInserter =1;
+                    }
+
+
 let Constraints  = "$dst = $src1", Defs = [R9, R10] in
 def LSB_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                     "LSB_PSEUDO\t $dst",[(set GR:$dst, (and GR:$src1, 1))]>{

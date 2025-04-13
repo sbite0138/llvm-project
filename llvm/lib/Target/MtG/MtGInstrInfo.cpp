@@ -48,12 +48,11 @@ void MtGInstrInfo::storeRegToStackSlot(
   // slot");
   // auto TmpReg2 = MtG::R10;
 
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_W1G))
-      .addUse(MtG::R0);
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_W1G)).addUse(MtG::R0);
 
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::CALC_FI_PSEUDO))
       .addFrameIndex(FrameIdx);
-    
+
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STORE))
       .addUse(SrcReg)
       .addUse(MtG::R0);
@@ -160,8 +159,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       Digits.push_back(0);
     else
       while (Imm > 0) {
-        Digits.push_back(Imm % 12);
-        Imm /= 12;
+        Digits.push_back(Imm % 144);
+        Imm /= 144;
       }
     std::reverse(Digits.begin(), Digits.end());
 
@@ -192,8 +191,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       Digits.push_back(0);
     else
       while (Imm > 0) {
-        Digits.push_back(Imm % 12);
-        Imm /= 12;
+        Digits.push_back(Imm % 144);
+        Imm /= 144;
       }
     std::reverse(Digits.begin(), Digits.end());
 
@@ -225,5 +224,5 @@ void MtGInstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
   assert(isInt<32>(Amount));
   BuildMI(MBB, I, DL, get(MtG::ADD_OR_SUB_PSEUDO), SP)
       .addUse(SP)
-      .addImm(Amount );
+      .addImm(Amount);
 }

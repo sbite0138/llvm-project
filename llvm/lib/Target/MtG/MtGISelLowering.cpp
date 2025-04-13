@@ -63,7 +63,7 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
 
   // Provide all sorts of operation actions
   setStackPointerRegisterToSaveRestore(MtG::R8);
-  // setOperationAction(ISD::SDIV, MVT::i32, Custom);
+  setOperationAction(ISD::SDIV, MVT::i32, Custom);
 }
 bool MtGTargetLowering::isIntDivCheap(EVT VT, AttributeList Attr) const {
   return true;
@@ -374,6 +374,39 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg1).addUse(SrcReg2);
     BuildMI(*BB, MI, DL, TII.get(MtG::FLESS)).addUse(SrcReg2).addUse(SrcReg1);
     BuildMI(*BB, MI, DL, TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+    return BB;
+  }
+  case MtG::SGEQ_PSEUDO: {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    unsigned DstReg = MI.getOperand(0).getReg();
+    unsigned SrcReg1 = MI.getOperand(1).getReg();
+    unsigned SrcReg2 = MI.getOperand(2).getReg();
+    Register TmpReg1 = MF.getRegInfo().createVirtualRegister(&MtG::GRRegClass);
+    auto MIB = BuildMI(*BB, MI, DL, TII.get(MtG::SLT_PSEUDO), TmpReg1)
+                   .addUse(SrcReg1)
+                   .addUse(SrcReg2);
+    EmitInstrWithCustomInserter(*MIB.getInstr(), BB);
+    BuildMI(*BB, MI, DL, TII.get(MtG::FISZERO)).addUse(TmpReg1);
+    BuildMI(*BB, MI, DL, TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+    return BB;
+  }
+  case MtG::SLEQ_PSEUDO: {
+    DebugLoc DL = MI.getDebugLoc();
+    MachineFunction &MF = *BB->getParent();
+    const MtGSubtarget &STI = MF.getSubtarget<MtGSubtarget>();
+    const TargetInstrInfo &TII = *STI.getInstrInfo();
+    unsigned DstReg = MI.getOperand(0).getReg();
+    unsigned SrcReg1 = MI.getOperand(1).getReg();
+    unsigned SrcReg2 = MI.getOperand(2).getReg();
+    auto MIB = BuildMI(*BB, MI, DL, TII.get(MtG::SGEQ_PSEUDO), DstReg)
+                   .addUse(SrcReg1)
+                   .addUse(SrcReg2);
+    EmitInstrWithCustomInserter(*MIB.getInstr(), BB);
     MI.eraseFromParent();
     return BB;
   }

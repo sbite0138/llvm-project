@@ -244,3 +244,32 @@ def store_a: PatFrag<(ops node:$val, node:$ptr), (store node:$val, node:$ptr)>;
 def : Pat<(store_a GR:$rs0, GR:$rs1), (STORE GR:$rs0, GR:$rs1)>;
 
 def : Pat<(simm:$imm),(MOV_PSEUDO simm:$imm)>;
+
+
+def brtarget : Operand<OtherVT>{
+  let EncoderMethod = "getPCRelImmOpValue";
+  
+  let PrintMethod = "printPCRelImmOperand";
+}
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1  in 
+def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
+                    "BR_PSEUDO $imm",[(br bb:$imm)]> {
+                        let usesCustomInserter = 1;
+                    }
+
+  
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1  in 
+def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
+                    "BRCOND_PSEUDO $cond, $imm",[(brcond GR:$cond, bb:$imm)]> {
+                    }
+
+
+
+def SELECT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
+                    "SELECT_PSEUDO $cond, $imm",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]> {
+                let AsmString = "SELECT_PSEUDO $dst, $cond, $tval, $fval";
+      }
+
+

@@ -64,7 +64,15 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   // Provide all sorts of operation actions
   setStackPointerRegisterToSaveRestore(MtG::R8);
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i32, Expand);
+  setOperationAction(ISD::SELECT, MVT::i32, Legal);
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
 }
+EVT MtGTargetLowering::getSetCCResultType(const DataLayout &DL,
+                                          LLVMContext &Ctx, EVT VT) const {
+  return MVT::i32;
+}
+
 bool MtGTargetLowering::isIntDivCheap(EVT VT, AttributeList Attr) const {
   return true;
 }
@@ -73,7 +81,16 @@ SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default:
     llvm_unreachable("unimplemented operand");
+  case ISD::SELECT:
+    return LowerSELECT(Op, DAG);
   }
+}
+
+SDValue MtGTargetLowering::LowerSELECT(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Cond = Op.getOperand(0);
+  SDValue TrueVal = Op.getOperand(1);
+  SDValue FalseVal = Op.getOperand(2);
 }
 
 //===----------------------------------------------------------------------===//
@@ -307,6 +324,10 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   switch (MI.getOpcode()) {
   default:
     llvm_unreachable("unimplemented custom inserter");
+  case MtG::BR_PSEUDO: {
+    MI.dump();
+    return BB;
+  }
   case MtG::LSB_PSEUDO: {
     DebugLoc DL = MI.getDebugLoc();
     MachineFunction &MF = *BB->getParent();

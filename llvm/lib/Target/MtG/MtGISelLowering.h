@@ -97,7 +97,9 @@ public:
   // SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
-  // SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
+  EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Ctx,
+                         EVT VT) const override;
   // SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
@@ -109,7 +111,8 @@ public:
   // getConstraintType(StringRef Constraint) const override;
   // std::pair<unsigned, const TargetRegisterClass *>
   // getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
-  //                              StringRef Constraint, MVT VT) const override;
+  //                              StringRef Constraint, MVT VT) const
+  //                              override;
 
   // /// isTruncateFree - Return true if it's free to truncate a value of type
   // /// Ty1 to type Ty2. e.g. On mtg it's free to truncate a i16 value in
@@ -129,7 +132,8 @@ public:
   //   bool isZExtFree(EVT VT1, EVT VT2) const override;
 
   //   bool isLegalICmpImmediate(int64_t) const override;
-  //   bool shouldAvoidTransformToShift(EVT VT, unsigned Amount) const override;
+  //   bool shouldAvoidTransformToShift(EVT VT, unsigned Amount) const
+  //   override;
 
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,

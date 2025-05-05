@@ -22,6 +22,17 @@ def MtGretglue  : SDNode<"MtGISD::RET_GLUE", SDTNone,
 def MtGImm  : SDNode<"MtGISD::IMM", SDTNone,
                        []>;
 
+def SDT_MtGCall: SDTypeProfile<0,1,[SDTCisVT<0,iPTR>]>;
+
+def MtGCall: SDNode<"MtGISD::CALL",SDT_MtGCall, [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
+
+def SDT_MtGCallSeqStart : SDCallSeqStart <[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
+def SDT_MtGCallSeqEnd : SDCallSeqEnd <[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
+
+def MtGCallSeqStart : SDNode<"ISD::CALLSEQ_START", SDT_MtGCallSeqStart, [SDNPHasChain, SDNPOutGlue]>;
+def MtGCallSeqEnd : SDNode<"ISD::CALLSEQ_END", SDT_MtGCallSeqEnd, [SDNPHasChain, SDNPOutGlue]>;
+
+
 //===----------------------------------------------------------------------===//
 // MtG Operand Definitions.
 //===----------------------------------------------------------------------===//
@@ -33,7 +44,7 @@ def simm : Operand<i32>,
 }
 
 def uimm : Operand<i32>,
-            ImmLeaf<i32, [{return isInt<32>(Imm) && Imm >= 0;}]> {
+            ImmLeaf<i32, [{return isInt<32>(Imm);}]> {
   let DecoderMethod = "decodeImmOperand<32>";
 }
 
@@ -46,6 +57,16 @@ let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in
   def RET  : Pseudo<(outs), (ins), "ret",  [(MtGretglue)]> {
   }
 }
+
+
+let Defs = [R8, R0], Uses = [R8], hasSideEffects = 1, isCodeGenOnly = 1,  isPseudo = 1 in {
+
+  def ADJCALLSTACKDOWN : Pseudo<(outs), (ins simm:$amt1, simm:$amt2), "adjstackdown $amt1, $amt2",
+                                         [(MtGCallSeqStart timm:$amt1, timm:$amt2)]>;
+  def ADJCALLSTACKUP   : Pseudo<(outs), (ins simm:$amt1, simm:$amt2), "adjstackup $amt1, $amt2",
+                                         [(MtGCallSeqEnd timm:$amt1, timm:$amt2)]>;
+}
+
 
 //===----------------------------------------------------------------------===//
 // Move Instructions
@@ -157,7 +178,7 @@ def SUB_PSEUDO : Pseudo<
 let Constraints = " $dst = $src"  in
 def SUB : CRRForm<0b0001,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
-                    "Sub\t $dst, $src2",[]>;
+                    "Sub\t $dst, $src2",[(set GR:$dst, (sub GR:$src, GR:$src2))]>;
 
 let Constraints = "$dst = $src", Defs = [R0] in
 def ADD_OR_SUB_PSEUDO : Pseudo<
@@ -252,7 +273,7 @@ def brtarget : Operand<OtherVT>{
   let PrintMethod = "printPCRelImmOperand";
 }
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1  in 
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0]  in 
 def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
                     "BR_PSEUDO $imm",[(br bb:$imm)]> {
                         let usesCustomInserter = 1;
@@ -260,7 +281,7 @@ def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
 
   
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1  in 
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0]  in 
 def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
                     "BRCOND_PSEUDO $cond, $imm",[(brcond GR:$cond, bb:$imm)]> {
                     }
@@ -270,6 +291,18 @@ def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
 def SELECT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
                     "SELECT_PSEUDO $cond, $imm",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]> {
                 let AsmString = "SELECT_PSEUDO $dst, $cond, $tval, $fval";
-      }
+}
+
+let  Defs = [R0] in 
+def LOADADDR_PSEUDO : Pseudo<(outs SR:$dst), (ins brtarget:$src),
+                    "LOADADDR_PSEUDO $dst, $src",[]>;
 
 
+let isCall = 1, Defs = [R0], isCodeGenOnly = 0 in {
+  def CALL_PSEUDO : Pseudo<(outs), (ins simm:$src),
+                    "Call $src",[]>;
+}
+
+
+def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
+          (CALL_PSEUDO tglobaladdr:$dst)>;

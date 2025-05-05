@@ -29,6 +29,15 @@ class MCObjectTargetWriter;
 class MCStreamer;
 class MCTargetStreamer;
 
+namespace MtGII {
+enum TOF {
+  MO_NONE,
+  MO_CALL,
+  MO_ABS,
+
+  MO_PCREL,
+}; // enum TOF
+}
 /// Creates a machine code emitter for MtG.
 MCCodeEmitter *createMtGMCCodeEmitter(const MCInstrInfo &MCII, MCContext &Ctx);
 

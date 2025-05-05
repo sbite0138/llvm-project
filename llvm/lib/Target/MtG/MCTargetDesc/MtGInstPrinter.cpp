@@ -63,7 +63,7 @@ void MtGInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     O << '#' << Op.getImm();
   } else {
     assert(Op.isExpr() && "unknown operand kind in printOperand");
-    O << '#';
+    O << '$';
     Op.getExpr()->print(O, &MAI);
   }
 }

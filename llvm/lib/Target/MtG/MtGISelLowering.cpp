@@ -23,11 +23,13 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/CodeGenTypes/MachineValueType.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -39,6 +41,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
+#include <utility>
 using namespace llvm;
 
 #define DEBUG_TYPE "mtg-lower"
@@ -47,26 +50,24 @@ static cl::opt<bool> MtGNoLegalImmediate(
     "mtg-no-legal-immediate", cl::Hidden,
     cl::desc("Enable non legal immediates (for testing purposes only)"),
     cl::init(false));
-
+// MtGTargetLowering.cpp
 MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
                                      const MtGSubtarget &STI)
     : TargetLowering(TM) {
 
-  // Set up the register classes.
-  addRegisterClass(MVT::i32, &MtG::SRRegClass);
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
-  // addRegisterClass(MVT::i32, &MtG::WRRegClass);  addRegisterClass(MVT::i16,
-  // &MtG::FRRegClass);
+  addRegisterClass(MVT::i32, &MtG::SRRegClass);
 
-  // Compute derived properties from the register classes
-  computeRegisterProperties(STI.getRegisterInfo());
-
-  // Provide all sorts of operation actions
+  // --- 操作アクションなど ---
   setStackPointerRegisterToSaveRestore(MtG::R8);
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
   setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::SELECT, MVT::i32, Legal);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+
+  // 低位整数は暗黙にプロモートされるので設定不要
+  computeRegisterProperties(STI.getRegisterInfo());
 }
 EVT MtGTargetLowering::getSetCCResultType(const DataLayout &DL,
                                           LLVMContext &Ctx, EVT VT) const {
@@ -81,16 +82,9 @@ SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default:
     llvm_unreachable("unimplemented operand");
-  case ISD::SELECT:
-    return LowerSELECT(Op, DAG);
+  case ISD::GlobalAddress:
+    return LowerGlobalAddress(Op, DAG);
   }
-}
-
-SDValue MtGTargetLowering::LowerSELECT(SDValue Op, SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  SDValue Cond = Op.getOperand(0);
-  SDValue TrueVal = Op.getOperand(1);
-  SDValue FalseVal = Op.getOperand(2);
 }
 
 //===----------------------------------------------------------------------===//
@@ -124,12 +118,12 @@ static void ParseFunctionArgs(const SmallVectorImpl<ArgT> &Args,
 
 static void AnalyzeVarArgs(CCState &State,
                            const SmallVectorImpl<ISD::OutputArg> &Outs) {
-  State.AnalyzeCallOperands(Outs, CC_MtG_AssignStack);
+  State.AnalyzeCallOperands(Outs, CC_MtG);
 }
 
 static void AnalyzeVarArgs(CCState &State,
                            const SmallVectorImpl<ISD::InputArg> &Ins) {
-  State.AnalyzeFormalArguments(Ins, CC_MtG_AssignStack);
+  State.AnalyzeFormalArguments(Ins, CC_MtG);
 }
 
 static void AnalyzeRetResult(CCState &State,
@@ -149,6 +143,129 @@ static void AnalyzeReturnValues(CCState &State,
   AnalyzeRetResult(State, Args);
 }
 
+SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
+                                     SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  SDLoc &dl = CLI.DL;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
+  SDValue Chain = CLI.Chain;
+  SDValue Callee = CLI.Callee;
+  bool &isTailCall = CLI.IsTailCall;
+  CallingConv::ID CallConv = CLI.CallConv;
+  bool isVarArg = CLI.IsVarArg;
+  SmallVector<CCValAssign, 16> RVLocs;
+  SmallVector<CCValAssign, 16> ArgLocs;
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
+                 *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(Outs, CC_MtG);
+  unsigned NumBytes = CCInfo.getStackSize();
+
+  // TODO: Handle byval arguments
+
+  if (!isTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SmallVector<SDValue, 8> MemOpChains;
+  SDValue StackPtr;
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    SDValue ArgValue = OutVals[i];
+    CCValAssign &VA = ArgLocs[i];
+    MVT LocVT = VA.getLocVT();
+
+    if (VA.getLocInfo() != CCValAssign::Full) {
+      llvm_unreachable("Unsupported argument location");
+    }
+    if (VA.isRegLoc()) {
+      RegsToPass.push_back(std::make_pair(VA.getLocReg(), ArgValue));
+      continue;
+    }
+    assert(VA.isMemLoc() && "Unknown argument location");
+
+    if (!StackPtr.getNode())
+      StackPtr = DAG.getCopyFromReg(Chain, dl, MtG::SP, PtrVT);
+    SDValue Address =
+        DAG.getNode(ISD::ADD, dl, PtrVT, StackPtr,
+                    DAG.getIntPtrConstant(VA.getLocMemOffset(), dl));
+
+    // Emit the store.
+    MemOpChains.push_back(
+        DAG.getStore(Chain, dl, ArgValue, Address,
+                     MachinePointerInfo::getStack(MF, VA.getLocMemOffset())));
+  }
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, MemOpChains);
+  SDValue Glue;
+
+  for (auto &Reg : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, dl, Reg.first, Reg.second, Glue);
+    Glue = Chain.getValue(1);
+  }
+
+  if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    const GlobalValue *GV = S->getGlobal();
+    unsigned OpFlags = MtGII::MO_CALL;
+
+    Callee = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0, OpFlags);
+
+  } else {
+    llvm_unreachable("Unsupported callee");
+  }
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  SmallVector<SDValue, 8> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+
+  // Add argument registers to the end of the list so that they are
+  // known live into the call.
+  for (unsigned i = 0, e = RegsToPass.size(); i != e; ++i)
+    Ops.push_back(DAG.getRegister(RegsToPass[i].first,
+                                  RegsToPass[i].second.getValueType()));
+
+  if (Glue.getNode())
+    Ops.push_back(Glue);
+
+  Chain = DAG.getNode(MtGISD::CALL, dl, NodeTys, Ops);
+  Glue = Chain.getValue(1);
+
+  // Create the CALLSEQ_END node.
+  Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, Glue, dl);
+  Glue = Chain.getValue(1);
+
+  // Handle result values, copying them out of physregs into vregs that we
+  // return.
+  return LowerCallResult(Chain, Glue, CallConv, isVarArg, Ins, dl, DAG, InVals);
+}
+/// LowerCallResult - Lower the result values of a call into the
+/// appropriate copies out of appropriate physical registers.
+///
+SDValue MtGTargetLowering::LowerCallResult(
+    SDValue Chain, SDValue InGlue, CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
+
+  // Assign locations to each value returned by this call.
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), RVLocs,
+                 *DAG.getContext());
+
+  AnalyzeReturnValues(CCInfo, RVLocs, Ins);
+
+  // Copy all of the result registers out of their specified physreg.
+  for (unsigned i = 0; i != RVLocs.size(); ++i) {
+    Chain = DAG.getCopyFromReg(Chain, dl, RVLocs[i].getLocReg(),
+                               RVLocs[i].getValVT(), InGlue)
+                .getValue(1);
+    InGlue = Chain.getValue(2);
+    InVals.push_back(Chain.getValue(0));
+  }
+
+  return Chain;
+}
 SDValue
 MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,
@@ -217,7 +334,7 @@ SDValue MtGTargetLowering::LowerFormalArguments(
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
                  *DAG.getContext());
-  CCInfo.AnalyzeFormalArguments(Ins, CC_MtG_AssignStack);
+  CCInfo.AnalyzeFormalArguments(Ins, CC_MtG);
 
   Function::const_arg_iterator FuncArg =
       DAG.getMachineFunction().getFunction().arg_begin();
@@ -435,8 +552,18 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   return BB;
 }
 
-// SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
-//                                               SelectionDAG &DAG) const {
-//   SDLoc DL(Op);
-//   EVT Ty
-// }
+SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  llvm::dbgs() << "LowerGlobalAddress\n";
+  const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
+  int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
+
+  EVT Ty = Op.getValueType();
+  SDLoc DL(Op);
+  SDValue Addr =
+      DAG.getTargetGlobalAddress(GV, SDLoc(Op), Ty, Offset, MtGII::MO_ABS);
+
+  // Create the TargetGlobalAddress node, folding in the constant offset.
+  // SDValue Result = DAG.getTargetGlobalAddress(GV, SDLoc(Op), PtrVT, Offset);
+  return SDValue(DAG.getMachineNode(MtG::LOADADDR_PSEUDO, DL, Ty, Addr), 0);
+}

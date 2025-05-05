@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
@@ -36,14 +37,14 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
   MachineFrameInfo &MFI = MF.getFrameInfo();
   const MtGInstrInfo &TII =
       *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
-      MFI.dump(MF);
+  MFI.dump(MF);
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
   unsigned SP = MtG::R8;
   uint64_t StackSize = MFI.getStackSize();
   if (StackSize == 0 && !MFI.adjustsStack())
     return;
-  dbgs()<<"[emitPrologue] StackSize: "<<StackSize<<"\n";
+  dbgs() << "[emitPrologue] StackSize: " << StackSize << "\n";
   const MCRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
   unsigned CFIIndex =
@@ -52,7 +53,7 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
       .addCFIIndex(CFIIndex);
 
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
-                            
+
   if (CSI.size()) {
     for (unsigned i = 0; i < CSI.size(); ++i)
       ++MBBI;
@@ -83,9 +84,21 @@ void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
   DebugLoc dl = MBBI->getDebugLoc();
   unsigned SP = MtG::R8;
   uint64_t StackSize = MFI.getStackSize();
-
   if (!StackSize)
     return;
 
   TII.adjustStackPtr(SP, StackSize, MBB, MBBI);
+}
+
+MachineBasicBlock::iterator MtGFrameLowering::eliminateCallFramePseudoInstr(
+    MachineFunction &MF, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator I) const {
+  unsigned SP = MtG::R8;
+  if (!hasReservedCallFrame(MF)) {
+    int64_t Amount = I->getOperand(0).getImm();
+    if (I->getOpcode() == MtG::ADJCALLSTACKDOWN)
+      Amount = -Amount;
+    STI.getInstrInfo()->adjustStackPtr(SP, Amount, MBB, I);
+  }
+  return MBB.erase(I);
 }

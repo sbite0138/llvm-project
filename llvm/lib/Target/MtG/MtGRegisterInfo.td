@@ -44,7 +44,7 @@ def SP : RegisterClass<"MtG", [i32], 32,
 
 
 // frame register
-def FR : RegisterClass<"MtG", [i16], 32,
+def FR : RegisterClass<"MtG", [i32], 32,
    (add R11) >;
 
 def FLAGR :  RegisterClass<"MtG", [i1], 1,

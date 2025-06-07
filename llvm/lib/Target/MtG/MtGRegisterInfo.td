@@ -10,8 +10,8 @@
 //  Declarations that describe the MtG register file
 //===----------------------------------------------------------------------===//
 
-class MtGReg<bits<64> num, string n> : Register<n> {
-  field bits<64> Num = num;
+class MtGReg<bits<32> num, string n> : Register<n> {
+  field bits<32> Num = num;
   let Namespace = "MtG";
 }
 
@@ -27,12 +27,12 @@ foreach I = 0-12 in
 def FLAG : MtGReg<13,"flag">;
 
 // special register
-def SR : RegisterClass<"MtG", [i32], 32,
-   (add R0) >;
+// def SR : RegisterClass<"MtG", [i32], 32,
+//    (add R0) >;
 
 // general register
 def GR : RegisterClass<"MtG", [i32], 32,
-   (sequence "R%u", 1, 7)>;
+   (sequence "R%u", 8, 11)>;
 
 // work register
 // def WR : RegisterClass<"MtG", [i32], 32,
@@ -40,12 +40,12 @@ def GR : RegisterClass<"MtG", [i32], 32,
 
 // stack pointer
 def SP : RegisterClass<"MtG", [i32], 32,
-   (add R8) >;
+   (add R7) >;
 
 
 // frame register
 def FR : RegisterClass<"MtG", [i32], 32,
-   (add R11) >;
+   (add R6) >;
 
-def FLAGR :  RegisterClass<"MtG", [i1], 1,
-   (add FLAG) >;
+// def FLAGR :  RegisterClass<"MtG", [i1], 1,
+//    (add FLAG) >;

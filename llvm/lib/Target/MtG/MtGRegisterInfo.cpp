@@ -81,7 +81,8 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     int64_t Offset;
     Offset = spOffset + (int64_t)stackSize;
     Offset += MI.getOperand(i + 1).getImm();
-    dbgs() << "[ADDSUB] stackSize: " << stackSize << " spOffset: " << spOffset << " Offset: " << Offset << "\n";
+    dbgs() << "[ADDSUB] stackSize: " << stackSize << " spOffset: " << spOffset
+           << " Offset: " << Offset << "\n";
 
     if (!MI.isDebugValue() && !isInt<12>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
@@ -95,8 +96,9 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     uint64_t stackSize = MF.getFrameInfo().getStackSize();
     int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
     int64_t Offset;
-    Offset = spOffset+ (int64_t)stackSize;
-    dbgs() << "[CALCFI] stackSize: " << stackSize << " spOffset: " << spOffset << " Offset: " << Offset << "\n";
+    Offset = spOffset + (int64_t)stackSize;
+    dbgs() << "[CALCFI] stackSize: " << stackSize << " spOffset: " << spOffset
+           << " Offset: " << Offset << "\n";
     if (!MI.isDebugValue() && !isInt<12>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<12>(Offset))");
     }

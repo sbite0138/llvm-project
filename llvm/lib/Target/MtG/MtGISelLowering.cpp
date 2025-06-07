@@ -56,7 +56,6 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
     : TargetLowering(TM) {
 
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
-  addRegisterClass(MVT::i32, &MtG::SRRegClass);
 
   // --- 操作アクションなど ---
   setStackPointerRegisterToSaveRestore(MtG::R8);

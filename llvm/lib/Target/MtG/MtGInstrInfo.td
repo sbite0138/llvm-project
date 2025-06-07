@@ -71,42 +71,6 @@ let Defs = [R8, R0], Uses = [R8], hasSideEffects = 1, isCodeGenOnly = 1,  isPseu
 //===----------------------------------------------------------------------===//
 // Move Instructions
 
-let isMoveReg = true in {
-def MOV_GG : CRRForm<0b0101,
-                    (outs GR:$rd), (ins GR:$rs),
-                    "Mov $rd, $rs",
-                    []>;
-
-def MOV_GS : CRRForm<0b0101,
-                    (outs GR:$rd), (ins SR:$rs),
-                    "Mov $rd, $rs",
-                    []>;
-
-def MOV_SG : CRRForm<0b0101,
-                    (outs SR:$rd), (ins GR:$rs),
-                    "Mov $rd, $rs",
-                    []>;
-let Uses = [R9] in 
-def MOV_GW1 : CRRForm<0b0101,
-                    (outs GR:$rd), (ins),
-                    "Mov $rd, r9",
-                    []>;
-let Uses = [R10] in 
-def MOV_GW2 : CRRForm<0b0101,
-                    (outs GR:$rd), (ins),
-                    "Mov $rd, r10",
-                    []>;
-let Defs = [R9] in 
-def MOV_W1G : CRRForm<0b0101,
-                    (outs), (ins GR:$rd),
-                    "Mov  r9, $rd",
-                    []>;
-let Defs = [R10] in 
-def MOV_W2G : CRRForm<0b0101,
-                    (outs), (ins GR:$rd),
-                    "Mov  r10, $rd",
-                    []>;
-}
 
 let Constraints = " $dst = $src"  in
 def ADD_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,uimm:$imm2),
@@ -122,9 +86,17 @@ def MUL : CRRForm<0b0010,
                     (outs GR:$dst), (ins GR:$src,GR:$src2),
                     "Mul\t $dst, $src2",[(set GR:$dst, (mul GR:$src, GR:$src2))]>;
 
-let Constraints = " $dst = $src", Defs = [R9, R10] in
+let Constraints = " $dst = $src", Defs = [R0, R6], Uses = [R6] in
 def DIV_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,GR:$src2),
                     "DIV_PSEUDO\t $dst, $src2",[(set GR:$dst, (sdiv GR:$src, GR:$src2))]>;
+
+let Constraints = " $dst = $src", Defs = [R0, R6], Uses = [R6] in
+def REM_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src,GR:$src2),
+                    "REM_PSEUDO\t $dst, $src2",[(set GR:$dst, (srem GR:$src, GR:$src2))]>;
+
+let Constraints = " $dst = $src", Defs = [FLAG, R0] in
+def SHL_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src, simm:$imm),
+                    "SHL_PSEUDO\t $dst, $imm",[(set GR:$dst, (shl GR:$src, simm:$imm))]>;
 
 let  Defs = [FLAG, R9, R10] in
 def SLT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$src1,GR:$src2),
@@ -186,85 +158,74 @@ def ADD_OR_SUB_PSEUDO : Pseudo<
                     "ADD_OR_SUB_PSEUDO\t $dst, $imm2",[]>;
 
 
-let  Defs = [R0] in 
-def NUMBUILD_INIT : CIIForm<0b1010,
-                    (outs SR:$rd), (ins simm:$imm),
-                    "NumBuild\t $rd, $imm",[]>;
+// let  Defs = [R0] in 
+// def NUMBUILD_INIT : CIIForm<0b1010,
+//                     (outs SR:$rd), (ins simm:$imm),
+//                     "NumBuild\t $rd, $imm",[]>;
 
-let Constraints = " $dst = $src" , Defs = [R0] in
-def NUMBUILD_SUCC : CIIForm<0b1010,
-                    (outs SR:$dst), (ins SR:$src, simm:$imm),
-                    "NumBuild\t $dst, $imm",[]>;
+// let Constraints = " $dst = $src" , Defs = [R0] in
+// def NUMBUILD_SUCC : CIIForm<0b1010,
+//                     (outs SR:$dst), (ins SR:$src, simm:$imm),
+//                     "NumBuild\t $dst, $imm",[]>;
 
-let  Defs = [R0], Uses = [R0] in 
-def NUMBUILD_PSEUDO : Pseudo<(outs SR:$dst), (ins simm:$imm),
-                    "DUMMY",[]>;
-let  Defs = [R0], Uses = [R0] in 
-def MOV_PSEUDO : Pseudo<(outs GR:$dst), (ins simm:$imm),
-                    "MOV_PSEUDO\t$dst,$imm",[]>;
+// let  Defs = [R0], Uses = [R0] in 
+// def NUMBUILD_PSEUDO : Pseudo<(outs SR:$dst), (ins simm:$imm),
+//                     "DUMMY",[]>;
+// let  Defs = [R0], Uses = [R0] in 
+// def MOV_PSEUDO : Pseudo<(outs GR:$dst), (ins simm:$imm),
+//                     "MOV_PSEUDO\t$dst,$imm",[]>;
 
-def LOAD : CRRForm<0b1001,
-                    (outs GR:$dst), (ins GR:$src),
-                    "Load\t $dst, $src",[]>;
+// def LOAD : CRRForm<0b1001,
+//                     (outs GR:$dst), (ins GR:$src),
+//                     "Load\t $dst, $src",[]>;
 
-def STORE : CRRForm<0b1000,
-                    (outs), (ins GR:$src0, GR:$src1),
-                    "Store\t $src0, $src1",[]>;
+// def STORE : CRRForm<0b1000,
+//                     (outs), (ins GR:$src0, GR:$src1),
+//                     "Store\t $src0, $src1",[]>;
 
-let  Defs = [FLAG] in 
-def FLESS : CRRForm<0b1011,
-                    (outs), (ins GR:$src0, GR:$src1),
-                    "FLess\t $src0, $src1",[]>;
+// let  Defs = [FLAG] in 
+// def FLESS : CRRForm<0b1011,
+//                     (outs), (ins GR:$src0, GR:$src1),
+//                     "FLess\t $src0, $src1",[]>;
 
-let  Defs = [FLAG] in
-def FISZERO : CRRForm<0b1011,
-                    (outs), (ins GR:$src0),
-                    "FIsZero\t $src0, $src0",[]>;
+// let  Defs = [FLAG] in
+// def FISZERO : CRRForm<0b1011,
+//                     (outs), (ins GR:$src0),
+//                     "FIsZero\t $src0, $src0",[]>;
 
-let Constraints = "$dst = $src", Defs = [FLAG] in
-def HALVE : CCRForm<0b01000010,
-                    (outs GR:$dst), (ins GR:$src),
-                    "Halve\t $src",[]>;
+// let Constraints = "$dst = $src", Defs = [FLAG] in
+// def HALVE : CCRForm<0b01000010,
+//                     (outs GR:$dst), (ins GR:$src),
+//                     "Halve\t $src",[]>;
 
-let Uses = [FLAG] in
-def SETF : CCRForm<0b00100010,
-                    (outs), (ins GR:$src0),
-                    "SetF\t $src0",[]>;
+// let Uses = [FLAG] in
+// def SETF : CCRForm<0b00100010,
+//                     (outs), (ins GR:$src0),
+//                     "SetF\t $src0",[]>;
 
-let  Uses = [FLAG] in
-def SETNF : CCRForm<0b00100011,
-                    (outs), (ins GR:$src0),
-                    "SetNF\t $src0",[]>;
-
-
-def ZERO : CCRForm<0b00000101,
-                    (outs GR:$dst), (ins),
-                    "Zero\t $dst",[]>;
-
-let Uses = [FLAG]  in     
-def JUMPBWDF_IMM : CCIForm<0b00111001,
-                    (outs), (ins simm:$imm),
-                    "JumpBwdF\t $imm",[]>;
+// let  Uses = [FLAG] in
+// def SETNF : CCRForm<0b00100011,
+//                     (outs), (ins GR:$src0),
+//                     "SetNF\t $src0",[]>;
 
 
-let Constraints = "$dst = $src" ,  Uses = [FLAG] in
-def SUB1COND : CCRForm<0b00100011,
-                    (outs GR:$dst), (ins GR:$src),
-                    "Sub1Cond\t $src",[]>;
+// def ZERO : CCRForm<0b00000101,
+//                     (outs GR:$dst), (ins),
+//                     "Zero\t $dst",[]>;
+
+// let Uses = [FLAG]  in     
+// def JUMPBWDF_IMM : CCIForm<0b00111001,
+//                     (outs), (ins simm:$imm),
+//                     "JumpBwdF\t $imm",[]>;
+
+
+// let Constraints = "$dst = $src" ,  Uses = [FLAG] in
+// def SUB1COND : CCRForm<0b00100011,
+//                     (outs GR:$dst), (ins GR:$src),
+//                     "Sub1Cond\t $src",[]>;
 
 
 
-let Constraints = "$dwork = $swork", Defs = [R0], Uses = [R0, R11] in 
-def CALC_FI_PSEUDO : Pseudo<
-                    (outs GR:$dwork), (ins GR:$swork),
-                    "CALC_FI",[]>;
-
-def load_a: PatFrag<(ops node:$ptr), (load node:$ptr)>;
-def : Pat<(load_a GR:$rs), (LOAD GR:$rs)>;
-def store_a: PatFrag<(ops node:$val, node:$ptr), (store node:$val, node:$ptr)>;
-def : Pat<(store_a GR:$rs0, GR:$rs1), (STORE GR:$rs0, GR:$rs1)>;
-
-def : Pat<(simm:$imm),(MOV_PSEUDO simm:$imm)>;
 
 
 def brtarget : Operand<OtherVT>{
@@ -288,14 +249,11 @@ def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
 
 
 
-def SELECT_PSEUDO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
-                    "SELECT_PSEUDO $cond, $imm",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]> {
-                let AsmString = "SELECT_PSEUDO $dst, $cond, $tval, $fval";
-}
 
-let  Defs = [R0] in 
-def LOADADDR_PSEUDO : Pseudo<(outs SR:$dst), (ins brtarget:$src),
-                    "LOADADDR_PSEUDO $dst, $src",[]>;
+
+// let  Defs = [R0] in 
+// def LOADADDR_PSEUDO : Pseudo<(outs SR:$dst), (ins tglobaladdr:$src),
+//                     "LOADADDR_PSEUDO $dst, $src",[]>;
 
 
 let isCall = 1, Defs = [R0], isCodeGenOnly = 0 in {
@@ -306,3 +264,64 @@ let isCall = 1, Defs = [R0], isCodeGenOnly = 0 in {
 
 def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
           (CALL_PSEUDO tglobaladdr:$dst)>;
+
+
+let usesCustomInserter = 1,  Defs = [R0, R1, R2, R3, R4, R5, R6, R7] in {
+def LOADBYTEWISE_MACRO : Pseudo<(outs GR:$val), (ins  GR:$addr),
+                    "LOADBYTEWISE_MACRO\t $val, $addr",[]>;
+def STOREBYTEWISE_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
+                    "STOREBYTEWISE_MACRO\t $val, $addr",[]>;
+
+def LOADBYTEWISE_IMM_MACRO : Pseudo<(outs GR:$val), (ins simm:$imm),
+                    "LOADBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
+def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, simm:$imm),
+                    "STOREBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
+
+let Constraints = " $dst = $src1" in {
+    def ADD_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "ADD_MACRO\t $dst, $src2",[(set GR:$dst, (add GR:$src1, GR:$src2))]>;
+    def SUB_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "SUB_MACRO\t $dst, $src2",[(set GR:$dst, (sub GR:$src1, GR:$src2))]>;
+    def MULHI_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "MULHI_MACRO\t $dst, $src2",[(set GR:$dst, (mulhs GR:$src1, GR:$src2))]>;
+    def MULLO_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "MULLO_MACRO\t $dst, $src2",[(set GR:$dst, (mul GR:$src1, GR:$src2))]>;
+    def DIV_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "DIV_MACRO\t $dst, $src2",[(set GR:$dst, (sdiv GR:$src1, GR:$src2))]>;
+    def REM_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "REM_MACRO\t $dst, $src2",[(set GR:$dst, (srem GR:$src1, GR:$src2))]>;
+    def AND_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "AND_MACRO\t $dst, $src2",[(set GR:$dst, (and GR:$src1, GR:$src2))]>;
+    def OR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "OR_MACRO\t $dst, $src2",[(set GR:$dst, (or GR:$src1, GR:$src2))]>;
+    def XOR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "XOR_MACRO\t $dst, $src2",[(set GR:$dst, (xor GR:$src1, GR:$src2))]>;
+    def SHL_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, simm:$imm),
+                    "SHL_MACRO\t $dst, $imm",[(set GR:$dst, (shl GR:$src1, simm:$imm))]>;
+    def SHR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, simm:$imm),
+                    "SHR_MACRO\t $dst, $imm",[(set GR:$dst, (srl GR:$src1, simm:$imm))]>;
+    def ASHR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, simm:$imm),
+                    "ASHR_MACRO\t $dst, $imm",[(set GR:$dst, (sra GR:$src1, simm:$imm))]>;
+    def NOT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
+                    "NOT_MACRO\t $dst",[(set GR:$dst, (xor GR:$src1, -1))]>;
+    def NEG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
+                    "NEG_MACRO\t $dst",[(set GR:$dst, (sub 0, GR:$src1))]>;
+    def MOVREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
+                    "MOVREG_MACRO\t $dst, $src1",[(set GR:$dst, GR:$src1)]>;
+  }
+  def MOVIMM_MACRO : Pseudo<(outs GR:$dst), (ins simm:$imm),
+                    "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, simm:$imm)]>;
+  def SELECT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
+                    "SELECT_MACRO\t $dst, $cond, $tval, $fval",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]>;
+let Constraints = "$dwork = $swork", Defs = [R0], Uses = [R0, R11] in 
+def CALC_FI_PSEUDO : Pseudo<
+                    (outs GR:$dwork), (ins GR:$swork),
+                    "CALC_FI",[]>;
+
+}
+
+def load_a: PatFrag<(ops node:$ptr), (load node:$ptr)>;
+def : Pat<(load_a GR:$rs), (LOADBYTEWISE_MACRO GR:$rs)>;
+
+def store_a: PatFrag<(ops node:$val, node:$ptr), (store node:$val, node:$ptr)>;
+def : Pat<(store_a GR:$rs0, GR:$rs1), (STOREBYTEWISE_MACRO GR:$rs0, GR:$rs1)>;

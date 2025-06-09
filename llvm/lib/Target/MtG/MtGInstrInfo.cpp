@@ -50,16 +50,9 @@ void MtGInstrInfo::storeRegToStackSlot(
   // slot");
   // auto TmpReg2 = MtG::R10;
 
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_W1G)).addUse(MtG::R0);
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::CALC_FI_PSEUDO))
-      .addFrameIndex(FrameIdx);
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STORE))
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_IMM_MACRO))
       .addUse(SrcReg)
-      .addUse(MtG::R0);
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_GW1), MtG::R0);
+      .addFrameIndex(FrameIdx);
 }
 
 void MtGInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
@@ -68,22 +61,9 @@ void MtGInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                         const TargetRegisterClass *RC,
                                         const TargetRegisterInfo *TRI,
                                         Register VReg) const {
-
-  auto TmpReg1 = MtG::R9;
-  auto TmpReg2 = MtG::R10;
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_GG), TmpReg1)
-      .addUse(MtG::R0);
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::CALC_FI_PSEUDO))
-      .addDef(TmpReg2)
-      .addFrameIndex(FrameIdx)
-      .addUse(TmpReg2);
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOAD), DestReg).addUse(MtG::R0);
-
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::MOV_GG), MtG::R0)
-      .addUse(TmpReg1, RegState::Kill);
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOADBYTEWISE_IMM_MACRO))
+      .addDef(DestReg)
+      .addFrameIndex(FrameIdx);
 }
 
 void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,

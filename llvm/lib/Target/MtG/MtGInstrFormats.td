@@ -23,6 +23,7 @@ class MtGInst<dag outs, dag ins, string asmstr> : Instruction {
 
   let AsmString = asmstr;
   let Size = 16;
+  let hasNoSchedulingInfo = 1;
 }
 
 
@@ -45,6 +46,7 @@ class CRCForm<bits<8> opcode, dag outs, dag ins, string asmstr, list<dag> patter
   let Inst{7-4}   = opcode{3-0};
   let Inst{3-0}   = 0b0000;
 }
+
 class CCCForm<bits<12> opcode, dag outs, dag ins, string asmstr, list<dag> pattern>
   : MtGInst<outs, ins, asmstr> {
   let Pattern = pattern;
@@ -83,6 +85,6 @@ class CCIForm<bits<8> opcode, dag outs, dag ins, string asmstr, list<dag> patter
 class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
   : MtGInst<outs, ins, asmstr> {
   let Pattern = pattern;
-  //let isCodeGenOnly = true;
-  let isPseudo = true;
+  let isCodeGenOnly = 1;
+  let isPseudo = 1;
 }

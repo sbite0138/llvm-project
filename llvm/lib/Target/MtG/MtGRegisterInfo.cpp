@@ -65,57 +65,58 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     ++i;
     assert(i < MI.getNumOperands() && "Instr doesn't have FrameIndex operand!");
   }
-  if (MI.getOpcode() == MtG::ADD_OR_SUB_PSEUDO) {
+  // if (MI.getOpcode() == MtG::ADD_OR_SUB_PSEUDO) {
 
-    assert(i == 1);
-    unsigned FrameReg = MtG::R11;
-    const auto SrcReg = MI.getOperand(0).getReg();
-    MBB.insert(II,
-               BuildMI(MF, DL, TII->get(MtG::MOV_GG), SrcReg).addUse(FrameReg));
+  //   assert(i == 1);
+  //   unsigned FrameReg = MtG::R11;
+  //   const auto SrcReg = MI.getOperand(0).getReg();
+  //   MBB.insert(II,
+  //              BuildMI(MF, DL, TII->get(MtG::MOV_GG),
+  //              SrcReg).addUse(FrameReg));
 
-    int FrameIndex = MI.getOperand(i).getIndex();
+  //   int FrameIndex = MI.getOperand(i).getIndex();
 
-    uint64_t stackSize = MF.getFrameInfo().getStackSize();
-    int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
+  //   uint64_t stackSize = MF.getFrameInfo().getStackSize();
+  //   int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
 
-    int64_t Offset;
-    Offset = spOffset + (int64_t)stackSize;
-    Offset += MI.getOperand(i + 1).getImm();
-    dbgs() << "[ADDSUB] stackSize: " << stackSize << " spOffset: " << spOffset
-           << " Offset: " << Offset << "\n";
+  //   int64_t Offset;
+  //   Offset = spOffset + (int64_t)stackSize;
+  //   Offset += MI.getOperand(i + 1).getImm();
+  //   dbgs() << "[ADDSUB] stackSize: " << stackSize << " spOffset: " <<
+  //   spOffset
+  //          << " Offset: " << Offset << "\n";
 
-    if (!MI.isDebugValue() && !isInt<12>(Offset)) {
-      assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
-    }
-    MI.getOperand(i + 0).ChangeToRegister(SrcReg, false);
-    MI.getOperand(i + 1).ChangeToImmediate(Offset);
+  //   if (!MI.isDebugValue() && !isInt<12>(Offset)) {
+  //     assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
+  //   }
+  //   MI.getOperand(i + 0).ChangeToRegister(SrcReg, false);
+  //   MI.getOperand(i + 1).ChangeToImmediate(Offset);
 
-    return true;
-  } else if (MI.getOpcode() == MtG::CALC_FI_PSEUDO) {
-    int FrameIndex = MI.getOperand(i).getIndex();
-    uint64_t stackSize = MF.getFrameInfo().getStackSize();
-    int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
-    int64_t Offset;
-    Offset = spOffset + (int64_t)stackSize;
-    dbgs() << "[CALCFI] stackSize: " << stackSize << " spOffset: " << spOffset
-           << " Offset: " << Offset << "\n";
-    if (!MI.isDebugValue() && !isInt<12>(Offset)) {
-      assert("(!MI.isDebugValue() && !isInt<12>(Offset))");
-    }
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_PSEUDO), MtG::R0)
-                       .addImm(std::abs(Offset)));
+  //   return true;
+  // } else if (MI.getOpcode() == MtG::CALC_FI_PSEUDO) {
+  //   int FrameIndex = MI.getOperand(i).getIndex();
+  //   uint64_t stackSize = MF.getFrameInfo().getStackSize();
+  //   int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
+  //   int64_t Offset;
+  //   Offset = spOffset + (int64_t)stackSize;
+  //   dbgs() << "[CALCFI] stackSize: " << stackSize << " spOffset: " <<
+  //   spOffset
+  //          << " Offset: " << Offset << "\n";
+  //   if (!MI.isDebugValue() && !isInt<12>(Offset)) {
+  //     assert("(!MI.isDebugValue() && !isInt<12>(Offset))");
+  //   }
+  //   MBB.insert(
+  //       II,
+  //       BuildMI(MF, DL, TII->get(MtG::MOVIMM_MACRO),
+  //       MtG::R1).addImm(Offset));
 
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOV_W2G)).addUse(MtG::R0));
-
-    MBB.insert(II,
-               BuildMI(MF, DL, TII->get(MtG::MOV_GG), MtG::R0).addUse(MtG::R8));
-    const auto Opc = (Offset >= 0) ? MtG::ADD : MtG::SUB;
-    MBB.insert(II, BuildMI(MF, DL, TII->get(Opc), MtG::R0)
-                       .addUse(MtG::R0)
-                       .addUse(MtG::R10, RegState::Kill));
-    MBB.erase(II);
-    return true;
-  }
+  //   MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), SrcReg)
+  //                      .addUse(MtG::R0)
+  //                      .addUse(MtG::R10, RegState::Kill));
+  //   MBB.erase(II);
+  //   return true;
+  // }
+  assert(false && "Unknown FrameIndex elimination!");
   return false;
 }
 

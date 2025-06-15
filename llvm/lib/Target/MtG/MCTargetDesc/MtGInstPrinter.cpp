@@ -68,6 +68,12 @@ void MtGInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   }
 }
 
+void MtGInstPrinter::printCallTargetOperand(const MCInst *MI, uint64_t Addr,
+                                            unsigned OpNo, raw_ostream &O,
+                                            const char *Modifier) {
+  printOperand(MI, OpNo, O);
+}
+
 void MtGInstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
                                         raw_ostream &O, const char *Modifier) {
   // const MCOperand &Base = MI->getOperand(OpNo);

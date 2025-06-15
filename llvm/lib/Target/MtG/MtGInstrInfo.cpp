@@ -71,129 +71,132 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                const DebugLoc &DL, MCRegister DestReg,
                                MCRegister SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
-  BuildMI(MBB, I, DL, get(MtG::MOV_GG), DestReg)
+  BuildMI(MBB, I, DL, get(MtG::MOVEREG_MACRO), DestReg)
       .addUse(SrcReg, getKillRegState(KillSrc));
 }
 
 bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
-  // llvm_unreachable("debug");
-  const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
-  if (MI.getOpcode() == MtG::ADD_OR_SUB_PSEUDO) {
-    auto DstReg = MI.getOperand(0).getReg();
-    auto SrcReg = MI.getOperand(1).getReg();
-    auto SrcImm = MI.getOperand(2).getImm();
-    if (SrcImm >= 0) {
-      expandPostRAPseudo(
-          *BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD_PSEUDO), DstReg)
-               .addUse(SrcReg)
-               .addImm(SrcImm));
-    } else {
+  // // llvm_unreachable("debug");
+  // const TargetInstrInfo &TII =
+  // *MF.getSubtarget<MtGSubtarget>().getInstrInfo(); if (MI.getOpcode() ==
+  // MtG::ADD_OR_SUB_PSEUDO) {
+  //   auto DstReg = MI.getOperand(0).getReg();
+  //   auto SrcReg = MI.getOperand(1).getReg();
+  //   auto SrcImm = MI.getOperand(2).getImm();
+  //   if (SrcImm >= 0) {
+  //     expandPostRAPseudo(
+  //         *BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD_PSEUDO),
+  //         DstReg)
+  //              .addUse(SrcReg)
+  //              .addImm(SrcImm));
+  //   } else {
 
-      expandPostRAPseudo(
-          *BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB_PSEUDO), DstReg)
-               .addUse(SrcReg)
-               .addImm(-SrcImm));
-    }
-    MI.eraseFromParent();
-    return true;
-  }
+  //     expandPostRAPseudo(
+  //         *BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB_PSEUDO),
+  //         DstReg)
+  //              .addUse(SrcReg)
+  //              .addImm(-SrcImm));
+  //   }
+  //   MI.eraseFromParent();
+  //   return true;
+  // }
 
-  if (MI.getOpcode() == MtG::ADD_PSEUDO) {
-    auto DstReg = MI.getOperand(0).getReg();
-    auto SrcReg = MI.getOperand(1).getReg();
-    auto SrcImm = MI.getOperand(2).getImm();
-    assert(DstReg == SrcReg);
+  // if (MI.getOpcode() == MtG::ADD_PSEUDO) {
+  //   auto DstReg = MI.getOperand(0).getReg();
+  //   auto SrcReg = MI.getOperand(1).getReg();
+  //   auto SrcImm = MI.getOperand(2).getImm();
+  //   assert(DstReg == SrcReg);
 
-    expandPostRAPseudo(*BuildMI(MBB, MI, MI.getDebugLoc(),
-                                TII.get(MtG::NUMBUILD_PSEUDO), MtG::R0)
-                            .addImm(SrcImm));
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
-        .addUse(SrcReg)
-        .addUse(MtG::R0);
-    MI.eraseFromParent();
-    return true;
-  }
+  //   expandPostRAPseudo(*BuildMI(MBB, MI, MI.getDebugLoc(),
+  //                               TII.get(MtG::NUMBUILD_PSEUDO), MtG::R0)
+  //                           .addImm(SrcImm));
+  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
+  //       .addUse(SrcReg)
+  //       .addUse(MtG::R0);
+  //   MI.eraseFromParent();
+  //   return true;
+  // }
 
-  if (MI.getOpcode() == MtG::SUB_PSEUDO) {
-    auto DstReg = MI.getOperand(0).getReg();
-    auto SrcReg = MI.getOperand(1).getReg();
-    auto SrcImm = MI.getOperand(2).getImm();
-    expandPostRAPseudo(*BuildMI(MBB, MI, MI.getDebugLoc(),
-                                TII.get(MtG::NUMBUILD_PSEUDO), MtG::R0)
-                            .addImm(SrcImm));
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB), DstReg)
-        .addUse(SrcReg)
-        .addUse(MtG::R0);
-    MI.eraseFromParent();
-    return true;
-  }
+  // if (MI.getOpcode() == MtG::SUB_PSEUDO) {
+  //   auto DstReg = MI.getOperand(0).getReg();
+  //   auto SrcReg = MI.getOperand(1).getReg();
+  //   auto SrcImm = MI.getOperand(2).getImm();
+  //   expandPostRAPseudo(*BuildMI(MBB, MI, MI.getDebugLoc(),
+  //                               TII.get(MtG::NUMBUILD_PSEUDO), MtG::R0)
+  //                           .addImm(SrcImm));
+  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB), DstReg)
+  //       .addUse(SrcReg)
+  //       .addUse(MtG::R0);
+  //   MI.eraseFromParent();
+  //   return true;
+  // }
 
-  if (MI.getOpcode() == MtG::NUMBUILD_PSEUDO) {
-    auto Imm = MI.getOperand(1).getImm();
-    assert(Imm >= 0);
+  // if (MI.getOpcode() == MtG::NUMBUILD_PSEUDO) {
+  //   auto Imm = MI.getOperand(1).getImm();
+  //   assert(Imm >= 0);
 
-    // assert(Imm > 0);
-    std::vector<unsigned> Digits;
-    if (Imm == 0)
-      Digits.push_back(0);
-    else
-      while (Imm > 0) {
-        Digits.push_back(Imm % 144);
-        Imm /= 144;
-      }
-    std::reverse(Digits.begin(), Digits.end());
+  //   // assert(Imm > 0);
+  //   std::vector<unsigned> Digits;
+  //   if (Imm == 0)
+  //     Digits.push_back(0);
+  //   else
+  //     while (Imm > 0) {
+  //       Digits.push_back(Imm % 144);
+  //       Imm /= 144;
+  //     }
+  //   std::reverse(Digits.begin(), Digits.end());
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
-        .addDef(MI.getOperand(0).getReg())
-        .addImm(Digits[0]);
+  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
+  //       .addDef(MI.getOperand(0).getReg())
+  //       .addImm(Digits[0]);
 
-    for (unsigned i = 1; i < Digits.size(); i++) {
-      unsigned Digit = Digits[i];
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
-          .addDef(MI.getOperand(0).getReg())
-          .addUse(MI.getOperand(0).getReg(), RegState::Kill)
-          .addImm(Digit);
-    }
-    MI.eraseFromParent();
-    return true;
-  }
+  //   for (unsigned i = 1; i < Digits.size(); i++) {
+  //     unsigned Digit = Digits[i];
+  //     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
+  //         .addDef(MI.getOperand(0).getReg())
+  //         .addUse(MI.getOperand(0).getReg(), RegState::Kill)
+  //         .addImm(Digit);
+  //   }
+  //   MI.eraseFromParent();
+  //   return true;
+  // }
 
-  if (MI.getOpcode() == MtG::MOV_PSEUDO) {
+  // if (MI.getOpcode() == MtG::MOV_PSEUDO) {
 
-    auto Imm = MI.getOperand(1).getImm();
-    assert(Imm >= 0);
-    // MI.dump();
-    // llvm::dbgs() << "MOV_PSEUDO Imm: " << Imm << "\n";
+  //   auto Imm = MI.getOperand(1).getImm();
+  //   assert(Imm >= 0);
+  //   // MI.dump();
+  //   // llvm::dbgs() << "MOV_PSEUDO Imm: " << Imm << "\n";
 
-    std::vector<unsigned> Digits;
-    if (Imm == 0)
-      Digits.push_back(0);
-    else
-      while (Imm > 0) {
-        Digits.push_back(Imm % 144);
-        Imm /= 144;
-      }
-    std::reverse(Digits.begin(), Digits.end());
+  //   std::vector<unsigned> Digits;
+  //   if (Imm == 0)
+  //     Digits.push_back(0);
+  //   else
+  //     while (Imm > 0) {
+  //       Digits.push_back(Imm % 144);
+  //       Imm /= 144;
+  //     }
+  //   std::reverse(Digits.begin(), Digits.end());
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
-        .addDef(MtG::R0)
-        .addImm(Digits[0]);
+  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
+  //       .addDef(MtG::R0)
+  //       .addImm(Digits[0]);
 
-    for (unsigned i = 1; i < Digits.size(); i++) {
-      unsigned Digit = Digits[i];
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
-          .addDef(MtG::R0)
-          .addUse(MtG::R0, RegState::Kill)
-          .addImm(Digit);
-    }
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOV_GG))
-        .addDef(MI.getOperand(0).getReg())
-        .addUse(MtG::R0);
-    MI.eraseFromParent();
-    return true;
-  }
+  //   for (unsigned i = 1; i < Digits.size(); i++) {
+  //     unsigned Digit = Digits[i];
+  //     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
+  //         .addDef(MtG::R0)
+  //         .addUse(MtG::R0, RegState::Kill)
+  //         .addImm(Digit);
+  //   }
+  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOV_GG))
+  //       .addDef(MI.getOperand(0).getReg())
+  //       .addUse(MtG::R0);
+  //   MI.eraseFromParent();
+  //   return true;
+  // }
 
   return false;
 }
@@ -203,7 +206,5 @@ void MtGInstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
                                   MachineBasicBlock::iterator I) const {
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   assert(isInt<32>(Amount));
-  BuildMI(MBB, I, DL, get(MtG::ADD_OR_SUB_PSEUDO), SP)
-      .addUse(SP)
-      .addImm(Amount);
+  BuildMI(MBB, I, DL, get(MtG::ADD_MACRO), SP).addUse(SP).addImm(Amount);
 }

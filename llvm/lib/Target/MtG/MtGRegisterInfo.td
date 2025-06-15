@@ -26,17 +26,9 @@ foreach I = 0-12 in
 
 def FLAG : MtGReg<13,"flag">;
 
-// special register
-// def SR : RegisterClass<"MtG", [i32], 32,
-//    (add R0) >;
-
 // general register
 def GR : RegisterClass<"MtG", [i32], 32,
    (sequence "R%u", 8, 11)>;
-
-// work register
-// def WR : RegisterClass<"MtG", [i32], 32,
-//    (add R9, R10) >;
 
 // stack pointer
 def SP : RegisterClass<"MtG", [i32], 32,
@@ -45,7 +37,5 @@ def SP : RegisterClass<"MtG", [i32], 32,
 
 // frame register
 def FR : RegisterClass<"MtG", [i32], 32,
-   (add R6) >;
+   (add R5) >;
 
-// def FLAGR :  RegisterClass<"MtG", [i1], 1,
-//    (add FLAG) >;

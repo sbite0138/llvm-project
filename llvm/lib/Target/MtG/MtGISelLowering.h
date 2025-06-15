@@ -68,6 +68,7 @@ enum NodeType : unsigned {
   /// DADD - Decimal addition with carry
   /// TODO Nothing generates a node of this type yet.
   DADD,
+  WRAP_ADDR, // Wrap address node for global addresses.
 };
 }
 
@@ -84,6 +85,8 @@ public:
     return MVT::i32;
   }
 
+  bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
+                             unsigned AS, Instruction *CtxI) const override;
   /// LowerOperation - Provide custom lowering hooks for some operations.
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 

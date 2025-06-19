@@ -40,8 +40,7 @@ const MCPhysReg *
 MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const MtGFrameLowering *TFI = getFrameLowering(*MF);
   const Function *F = &MF->getFunction();
-  static const MCPhysReg CalleeSavedRegs[] = {MtG::R4, MtG::R5, MtG::R6,
-                                              MtG::R7};
+  static const MCPhysReg CalleeSavedRegs[] = {};
   return CalleeSavedRegs;
 }
 
@@ -121,5 +120,5 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 }
 
 Register MtGRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  return MtG::R11;
+  return MtG::R1;
 }

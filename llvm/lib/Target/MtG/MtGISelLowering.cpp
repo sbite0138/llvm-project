@@ -56,17 +56,14 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
     : TargetLowering(TM) {
 
   addRegisterClass(MVT::i32, &MtG::GRRegClass);
-  addRegisterClass(MVT::iPTR, &MtG::GRRegClass);
 
-  // --- 操作アクションなど ---
-  setStackPointerRegisterToSaveRestore(MtG::R8);
+  // setStackPointerRegisterToSaveRestore(MtG::R8);
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
   setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::SELECT, MVT::i32, Legal);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
 
-  // 低位整数は暗黙にプロモートされるので設定不要
   computeRegisterProperties(STI.getRegisterInfo());
 }
 EVT MtGTargetLowering::getSetCCResultType(const DataLayout &DL,
@@ -272,6 +269,7 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<ISD::OutputArg> &Outs,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &dl, SelectionDAG &DAG) const {
+  llvm::dbgs() << "Hi!\n";
   MachineFunction &MF = DAG.getMachineFunction();
   // CCValAssign - represent the assignment of the return value
   // to a location
@@ -309,6 +307,10 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     Flag = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
+  dbgs() << "MtGTargetLowering::LowerReturn: "
+         << "CallConv: " << CallConv << ", isVarArg: " << isVarArg
+         << ", Chain: " << Chain.getNode() << ", Flag: " << Flag.getNode()
+         << "\n";
   RetOps[0] = Chain; // Update chain.
 
   // Add the glue if we have it.

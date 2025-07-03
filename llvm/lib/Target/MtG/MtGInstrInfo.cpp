@@ -50,7 +50,7 @@ void MtGInstrInfo::storeRegToStackSlot(
   // slot");
   // auto TmpReg2 = MtG::R10;
 
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_IMM_MACRO))
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_MACRO))
       .addUse(SrcReg)
       .addFrameIndex(FrameIdx);
 }
@@ -61,8 +61,7 @@ void MtGInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                         const TargetRegisterClass *RC,
                                         const TargetRegisterInfo *TRI,
                                         Register VReg) const {
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOADBYTEWISE_IMM_MACRO))
-      .addDef(DestReg)
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOADBYTEWISE_MACRO), DestReg)
       .addFrameIndex(FrameIdx);
 }
 

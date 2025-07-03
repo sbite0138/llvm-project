@@ -120,7 +120,10 @@ def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
           (CALL_PSEUDO tglobaladdr:$dst)>;
 
 
-let usesCustomInserter = 1,  Defs = [R0, R1, R2, R3, R4, R5, R6, R7] in {
+def MOVE : CRRForm<0b1001, (outs GR:$dst), (ins  GR:$src),
+                    "Move\t $dst, $src",[]>;
+
+let usesCustomInserter = 1,  Defs = [R0, R1, R2, R3, R4, R5, R6, R7]in {
 def LOADBYTEWISE_MACRO : Pseudo<(outs GR:$val), (ins  GR:$addr),
                     "LOADBYTEWISE_MACRO\t $val, $addr",[(set GR:$val, (load GR:$addr))]>;
 def STOREBYTEWISE_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
@@ -131,9 +134,7 @@ def LOADBYTEWISE_IMM_MACRO : Pseudo<(outs GR:$val), (ins mtgimm:$imm),
 def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, mtgimm:$imm),
                     "STOREBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
 
-
-
-let Constraints = " $dst = $src1" in {
+let Constraints = "$src1 = $dst" in {
     def ADD_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "ADD_MACRO\t $dst, $src2",[(set GR:$dst, (add GR:$src1, GR:$src2))]>;
     def SUB_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
@@ -163,8 +164,14 @@ let Constraints = " $dst = $src1" in {
     def NEG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                     "NEG_MACRO\t $dst",[(set GR:$dst, (sub 0, GR:$src1))]>;
     def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
-                    "MOVREG_MACRO\t $dst, $src1",[(set GR:$dst, GR:$src1)]>;
+                    "MOVREG_MACRO\t $dst, $src1",[]>;
   }
+   def EQ_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "EQ_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (seteq GR:$src1, GR:$src2))]>;
+   def NEQ_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "NEQ_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setne GR:$src1, GR:$src2))]>;
+   def LT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "LT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setlt GR:$src1, GR:$src2))]>;
   def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
                     "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
   def SELECT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),

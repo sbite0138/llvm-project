@@ -40,7 +40,7 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
   MFI.dump(MF);
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
-  unsigned SP = MtG::R8;
+  unsigned SP = MtG::R2;
   uint64_t StackSize = MFI.getStackSize();
   if (StackSize == 0 && !MFI.adjustsStack())
     return;
@@ -82,7 +82,7 @@ void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
       *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
 
   DebugLoc dl = MBBI->getDebugLoc();
-  unsigned SP = MtG::R8;
+  unsigned SP = MtG::R2;
   uint64_t StackSize = MFI.getStackSize();
   if (!StackSize)
     return;
@@ -93,7 +93,7 @@ void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
 MachineBasicBlock::iterator MtGFrameLowering::eliminateCallFramePseudoInstr(
     MachineFunction &MF, MachineBasicBlock &MBB,
     MachineBasicBlock::iterator I) const {
-  unsigned SP = MtG::R8;
+  unsigned SP = MtG::R2;
   if (!hasReservedCallFrame(MF)) {
     int64_t Amount = I->getOperand(0).getImm();
     if (I->getOpcode() == MtG::ADJCALLSTACKDOWN)

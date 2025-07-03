@@ -30,12 +30,15 @@ def FLAG : MtGReg<13,"flag">;
 def GR : RegisterClass<"MtG", [i32], 32,
    (sequence "R%u", 8, 11)>;
 
+// work register
+def WR : RegisterClass<"MtG", [i32], 32,
+   (sequence "R%u", 3, 7)>;
+
 // stack pointer
 def SP : RegisterClass<"MtG", [i32], 32,
-   (add R7) >;
-
+   (add R2) >;
 
 // frame register
 def FR : RegisterClass<"MtG", [i32], 32,
-   (add R5) >;
+   (add R1) >;
 

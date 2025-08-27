@@ -183,8 +183,9 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     }
     assert(VA.isMemLoc() && "Unknown argument location");
 
-    if (!StackPtr.getNode())
+    if (!StackPtr.getNode()) {
       StackPtr = DAG.getCopyFromReg(Chain, dl, MtG::SP, PtrVT);
+    }
     SDValue Address =
         DAG.getNode(ISD::ADD, dl, PtrVT, StackPtr,
                     DAG.getIntPtrConstant(VA.getLocMemOffset(), dl));
@@ -269,7 +270,6 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<ISD::OutputArg> &Outs,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &dl, SelectionDAG &DAG) const {
-  llvm::dbgs() << "Hi!\n";
   MachineFunction &MF = DAG.getMachineFunction();
   // CCValAssign - represent the assignment of the return value
   // to a location
@@ -299,6 +299,10 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     assert(VA.isRegLoc() && "Can only return in registers!");
     assert(RVLocs[i].getValVT() == RVLocs[i].getLocVT() &&
            "Return value and register value types must match");
+    dbgs() << "[!!!!] MtGTargetLowering::LowerReturn: "
+           << "CallConv: " << CallConv << ", isVarArg: " << isVarArg
+           << ", Chain: " << Chain.getNode() << ", Flag: " << Flag.getNode()
+           << "\n";
 
     Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Val, Flag);
 
@@ -440,14 +444,6 @@ const char *MtGTargetLowering::getTargetNodeName(unsigned Opcode) const {
 MachineBasicBlock *
 MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                MachineBasicBlock *BB) const {
-  // switch (MI.getOpcode()) {
-  // default:
-  //   llvm_unreachable("unimplemented custom inserter");
-  // case MtG::BR_PSEUDO: {
-  //   MI.dump();
-  //   return BB;
-  // }
-  // }
   MachineBasicBlock *MBB = BB; // 引数で渡される BB
   MachineFunction &MF = *MBB->getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
@@ -461,16 +457,9 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   for (auto &Op : MI.operands()) {
     if (Op.isReg() && Op.getReg().isVirtual()) {
       dbgs() << "Custom inserter: " << printReg(Op.getReg(), TRI) << "\n";
-      // Copy the virtual register to a R1
+      // TODO: Implement custom insertion logic when needed
       unsigned PhysReg = WorkRegs[RegIdx++];
       unsigned VirtReg = Op.getReg();
-      // MachineInstr *CopyMI = BuildMI(*MBB, MI, DL, TII.get(MtG::MOVE),
-      // PhysReg)
-      //                            .addUse(VirtReg, RegState::Kill);
-      // MBB->insert(MI, CopyMI);
-      // Replace the virtual register with the physical register
-      // Op.setReg(PhysReg);
-      // dbgs() << "Replaced with: " << printReg(PhysReg, TRI) << "\n";
     }
   }
   return BB;

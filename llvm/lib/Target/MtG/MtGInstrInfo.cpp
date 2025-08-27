@@ -49,7 +49,7 @@ void MtGInstrInfo::storeRegToStackSlot(
   // assert(RC == &MtG::GRRegClass && "Can only store GRRegClass to stack
   // slot");
   // auto TmpReg2 = MtG::R10;
-
+  assert(SrcReg != MtG::FLAG && "Cannot store FLAG register to stack slot");
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_MACRO))
       .addUse(SrcReg)
       .addFrameIndex(FrameIdx);

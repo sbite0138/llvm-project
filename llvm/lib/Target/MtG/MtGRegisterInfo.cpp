@@ -40,12 +40,15 @@ const MCPhysReg *
 MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const MtGFrameLowering *TFI = getFrameLowering(*MF);
   const Function *F = &MF->getFunction();
-  static const MCPhysReg CalleeSavedRegs[] = {};
+  static const MCPhysReg CalleeSavedRegs[] = {
+      MtG::R1, MtG::R2, MtG::R3, MtG::R4,  MtG::R5, MtG::R6,
+      MtG::R7, MtG::R8, MtG::R9, MtG::R10, MtG::R11};
   return CalleeSavedRegs;
 }
 
 BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
+  Reserved.set(MtG::FLAG);
   return Reserved;
 }
 
@@ -58,7 +61,6 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   DebugLoc DL = MI.getDebugLoc();
   MachineBasicBlock &MBB = *MI.getParent();
   auto *TII = MF.getSubtarget().getInstrInfo();
-  MI.dump();
   unsigned i = 0;
   while (!MI.getOperand(i).isFI()) {
     ++i;
@@ -79,8 +81,6 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     int64_t Offset;
     Offset = spOffset + (int64_t)stackSize;
     Offset += MI.getOperand(i + 1).getImm();
-    dbgs() << "[ADD_MACRO] stackSize: " << stackSize
-           << " spOffset: " << spOffset << " Offset: " << Offset << "\n";
 
     if (!MI.isDebugValue() && !isInt<16>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
@@ -89,7 +89,6 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     MI.getOperand(i + 0).ChangeToRegister(SrcReg, false);
     MI.getOperand(i + 1).ChangeToImmediate(Offset);
     llvm::dbgs() << "[ADD_MACRO] Changed to: ";
-    MI.dump();
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO ||
              MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
@@ -99,8 +98,6 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
     int64_t Offset;
     Offset = spOffset + (int64_t)stackSize;
-    dbgs() << "[CALCFI] stackSize: " << stackSize << " spOffset: " << spOffset
-           << " Offset: " << Offset << "\n";
     if (!MI.isDebugValue() && !isInt<12>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<12>(Offset))");
     }

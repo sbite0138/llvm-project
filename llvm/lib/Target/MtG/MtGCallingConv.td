@@ -12,14 +12,14 @@
 // MtG Return Value Calling Convention
 //===----------------------------------------------------------------------===//
 def RetCC_MtG : CallingConv<[
-  CCIfType<[i32], CCAssignToReg<[R1,R2]>>
+  CCIfType<[i32], CCAssignToReg<[R3,R4]>>
 ]>;
 
 //===----------------------------------------------------------------------===//
 // MtG Argument Calling Conventions
 //===----------------------------------------------------------------------===//
 def CC_MtG : CallingConv<[
-  CCIfType<[i32], CCAssignToReg<[R1,R2]>>,
+  CCIfType<[i32], CCAssignToReg<[R3,R4,R5]>>,
   CCIfType<[i32], CCAssignToStack<4, 4>>,
 ]>;
 

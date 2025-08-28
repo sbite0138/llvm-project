@@ -21,10 +21,10 @@ class MtGReg<bits<32> num, string n> : Register<n> {
 
 
 // General Register
-foreach I = 0-12 in
+foreach I = 0-11 in
   def R#I  : MtGReg<!add(1,I),  "r"#I>;
 
-def FLAG : MtGReg<13,"flag">;
+def FLAG : MtGReg<12,"flag">;
 
 // general register
 def GR : RegisterClass<"MtG", [i32], 32,

@@ -172,6 +172,8 @@ let Constraints = "$src1 = $dst" in {
                     "NEQ_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setne GR:$src1, GR:$src2))]>;
    def LT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "LT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setlt GR:$src1, GR:$src2))]>;
+   def GT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "GT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setgt GR:$src1, GR:$src2))]>;
   def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
                     "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
   def SELECT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),

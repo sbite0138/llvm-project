@@ -184,7 +184,7 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     assert(VA.isMemLoc() && "Unknown argument location");
 
     if (!StackPtr.getNode()) {
-      StackPtr = DAG.getCopyFromReg(Chain, dl, MtG::SP, PtrVT);
+      StackPtr = DAG.getCopyFromReg(Chain, dl, MtG::R2, PtrVT);
     }
     SDValue Address =
         DAG.getNode(ISD::ADD, dl, PtrVT, StackPtr,

@@ -70,7 +70,7 @@ let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in
 }
 
 
-let Defs = [R8, R0], Uses = [R8], hasSideEffects = 1, isCodeGenOnly = 1,  isPseudo = 1 in {
+let Defs = [R2, R0], Uses = [R2], hasSideEffects = 1, isCodeGenOnly = 1,  isPseudo = 1 in {
 
   def ADJCALLSTACKDOWN : Pseudo<(outs), (ins mtgimm:$amt1, mtgimm:$amt2), "adjstackdown $amt1, $amt2",
                                          [(MtGCallSeqStart timm:$amt1, timm:$amt2)]>;
@@ -136,6 +136,8 @@ def LOADBYTEWISE_IMM_MACRO : Pseudo<(outs GR:$val), (ins mtgimm:$imm),
                     "LOADBYTEWISE_IMM_MACRO\t $val, $imm",[]>; 
 def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, mtgimm:$imm),
                     "STOREBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
+def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
+                "MOVREG_MACRO\t $dst, $src1",[]>;
 
 let Constraints = "$src1 = $dst" in {
     def ADD_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
@@ -168,8 +170,6 @@ let Constraints = "$src1 = $dst" in {
                     "NOT_MACRO\t $dst",[(set GR:$dst, (xor GR:$src1, -1))]>;
     def NEG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                     "NEG_MACRO\t $dst",[(set GR:$dst, (sub 0, GR:$src1))]>;
-    def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
-                    "MOVREG_MACRO\t $dst, $src1",[]>;
   } 
    def EQ_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "EQ_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (seteq GR:$src1, GR:$src2))]>;

@@ -28,7 +28,7 @@ def FLAG : MtGReg<12,"flag">;
 
 // general register
 def GR : RegisterClass<"MtG", [i32], 32,
-   (sequence "R%u", 8, 11)>;
+   (sequence "R%u", 0, 11)>;
 
 // work register
 def WR : RegisterClass<"MtG", [i32], 32,

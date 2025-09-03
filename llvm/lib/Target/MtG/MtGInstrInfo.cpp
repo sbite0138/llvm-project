@@ -205,5 +205,5 @@ void MtGInstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
                                   MachineBasicBlock::iterator I) const {
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   assert(isInt<32>(Amount));
-  BuildMI(MBB, I, DL, get(MtG::ADD_MACRO), SP).addUse(SP).addImm(Amount);
+  BuildMI(MBB, I, DL, get(MtG::ADD_IMM_MACRO), SP).addUse(SP).addImm(Amount);
 }

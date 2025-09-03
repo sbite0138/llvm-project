@@ -25,6 +25,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include <cstdint>
 
 using namespace llvm;
 
@@ -49,6 +50,15 @@ MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   Reserved.set(MtG::FLAG);
+  Reserved.set(MtG::R0);
+  Reserved.set(MtG::R1);
+  Reserved.set(MtG::R2);
+  Reserved.set(MtG::R3);
+  Reserved.set(MtG::R4);
+  Reserved.set(MtG::R5);
+  Reserved.set(MtG::R6);
+  Reserved.set(MtG::R7);
+
   return Reserved;
 }
 
@@ -66,29 +76,27 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     ++i;
     assert(i < MI.getNumOperands() && "Instr doesn't have FrameIndex operand!");
   }
-  if (MI.getOpcode() == MtG::ADD_MACRO) {
-    assert(i == 1);
+  if (MI.getOpcode() == MtG::ADD_MACRO_FI) {
     unsigned FrameReg = MtG::R1;
-    const auto SrcReg = MI.getOperand(0).getReg();
-    MBB.insert(II,
-               BuildMI(MF, DL, TII->get(MtG::MOVE), SrcReg).addUse(FrameReg));
+    const auto DstReg = MI.getOperand(0).getReg();
+    const auto FrameIndex = MI.getOperand(1).getIndex();
+    const auto Offset = MI.getOperand(2).getImm();
+    const int64_t totalOffset =
+        MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj + Offset;
 
-    int FrameIndex = MI.getOperand(i).getIndex();
+    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), DstReg)
+                       .addUse(getFrameRegister(MF)));
 
-    uint64_t stackSize = MF.getFrameInfo().getStackSize();
-    int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
-
-    int64_t Offset;
-    Offset = spOffset + (int64_t)stackSize;
-    Offset += MI.getOperand(i + 1).getImm();
+    MBB.insert(
+        II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
 
     if (!MI.isDebugValue() && !isInt<16>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
     }
-
-    MI.getOperand(i + 0).ChangeToRegister(SrcReg, false);
-    MI.getOperand(i + 1).ChangeToImmediate(Offset);
-    llvm::dbgs() << "[ADD_MACRO] Changed to: ";
+    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), DstReg)
+                       .addReg(DstReg)
+                       .addReg(MtG::R0));
+    MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO ||
              MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {

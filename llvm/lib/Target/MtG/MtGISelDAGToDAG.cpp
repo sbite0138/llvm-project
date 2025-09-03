@@ -126,7 +126,7 @@ FunctionPass *llvm::createMtGISelDag(MtGTargetMachine &TM,
 
 void MtGDAGToDAGISel::Select(SDNode *Node) {
   SDLoc dl(Node);
-
+  EVT PtrVT = TLI->getPointerTy(CurDAG->getDataLayout());
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode()) {
     LLVM_DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
@@ -139,15 +139,32 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
   switch (Opcode) {
   default:
     break;
-  // case MtG::SLT_PSEUDO: {
-  //   llvm_unreachable("MtG::SLT_PSEUDO");
-  // }
   case ISD::FrameIndex: {
-    SDValue Imm = CurDAG->getTargetConstant(0, dl, MVT::i32);
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();
-    SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
-    ReplaceNode(Node, CurDAG->getMachineNode(MtG::ADD_MACRO, dl, VT, TFI, Imm));
+    SDValue FIVal = CurDAG->getTargetFrameIndex(FI, PtrVT); // ★非Target版
+    SDValue Ofs = CurDAG->getTargetConstant(0, dl, PtrVT);
+    ReplaceNode(
+        Node, CurDAG->getMachineNode(MtG::ADD_MACRO_FI, dl, PtrVT, FIVal, Ofs));
     return;
+  }
+  case ISD::ADD: {
+    SDValue A = Node->getOperand(0), B = Node->getOperand(1);
+    FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(A.getNode());
+    ConstantSDNode *CN = dyn_cast<ConstantSDNode>(B.getNode());
+    if (!FIN) { // 逆順 add(const, FI)
+      FIN = dyn_cast<FrameIndexSDNode>(B.getNode());
+      CN = dyn_cast<ConstantSDNode>(A.getNode());
+    }
+    if (FIN && CN) {
+      int FI = FIN->getIndex();
+      int64_t ofs = CN->getSExtValue();
+      SDValue FIVal = CurDAG->getFrameIndex(FI, PtrVT);        // ★
+      SDValue Ofs = CurDAG->getTargetConstant(ofs, dl, PtrVT); // ★
+      ReplaceNode(Node, CurDAG->getMachineNode(MtG::ADD_MACRO_FI, dl, PtrVT,
+                                               FIVal, Ofs));
+      return;
+    }
+    break; // 他のADDは通常規則へ
   }
   }
   // Select the default instruction

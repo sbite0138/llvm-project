@@ -454,20 +454,23 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   llvm::SmallVector<Register, 7> WorkRegs = {
       MtG::R0, MtG::R1, MtG::R2, MtG::R3, MtG::R4, MtG::R5, MtG::R6, MtG::R7};
   auto RegIdx = 0;
-  // switch (MI.getOpcode()) {
-  // case MtG::MOVEIMM_MACRO:
-  //   // MOVIMM_MACRO $GR, IMM
-  //   // to
-  //   // NUMBUILD_MACRO IMM
-  //   // MOVE $GR, R0
-  //   MI.setDesc(TII.get(MtG::MOVE));
-  //   MI.getOperand(1).setReg(WorkRegs[0]);
-  //   MI.getOperand(2).setImm(0);
+  switch (MI.getOpcode()) {
+  case MtG::MOVEIMM_MACRO:
+    // MOVIMM_MACRO $GR, IMM
+    // to
+    // NUMBUILD_MACRO IMM
+    // MOVE $GR, R0
+    BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(MI.getOperand(1).getImm());
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MOVE), MI.getOperand(0).getReg())
+        .addReg(MtG::R0);
 
-  //   break;
-  // default:
-  //   break;
-  // }
+    MI.eraseFromParent();
+
+    break;
+  default:
+    break;
+  }
   return BB;
 }
 

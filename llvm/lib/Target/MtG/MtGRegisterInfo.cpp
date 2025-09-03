@@ -109,9 +109,10 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     if (!MI.isDebugValue() && !isInt<12>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<12>(Offset))");
     }
-    MBB.insert(
-        II,
-        BuildMI(MF, DL, TII->get(MtG::MOVEIMM_MACRO), MtG::R2).addImm(Offset));
+    MBB.insert(II,
+               BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(Offset));
+    MBB.insert(II,
+               BuildMI(MF, DL, TII->get(MtG::MOVE), MtG::R2).addReg(MtG::R0));
 
     MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), MtG::R2)
                        .addUse(MtG::R2, RegState::Kill)

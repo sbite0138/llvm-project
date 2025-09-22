@@ -50,7 +50,7 @@ void MtGInstrInfo::storeRegToStackSlot(
   // slot");
   // auto TmpReg2 = MtG::R10;
   assert(SrcReg != MtG::FLAG && "Cannot store FLAG register to stack slot");
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_MACRO))
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_FI_MACRO))
       .addUse(SrcReg)
       .addFrameIndex(FrameIdx);
 }
@@ -61,7 +61,8 @@ void MtGInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                         const TargetRegisterClass *RC,
                                         const TargetRegisterInfo *TRI,
                                         Register VReg) const {
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOADBYTEWISE_MACRO), DestReg)
+
+  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOADBYTEWISE_FI_MACRO), DestReg)
       .addFrameIndex(FrameIdx);
 }
 
@@ -78,30 +79,26 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
   // // llvm_unreachable("debug");
-  // const TargetInstrInfo &TII =
-  // *MF.getSubtarget<MtGSubtarget>().getInstrInfo(); if (MI.getOpcode() ==
-  // MtG::ADD_OR_SUB_PSEUDO) {
-  //   auto DstReg = MI.getOperand(0).getReg();
-  //   auto SrcReg = MI.getOperand(1).getReg();
-  //   auto SrcImm = MI.getOperand(2).getImm();
-  //   if (SrcImm >= 0) {
-  //     expandPostRAPseudo(
-  //         *BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD_PSEUDO),
-  //         DstReg)
-  //              .addUse(SrcReg)
-  //              .addImm(SrcImm));
-  //   } else {
-
-  //     expandPostRAPseudo(
-  //         *BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB_PSEUDO),
-  //         DstReg)
-  //              .addUse(SrcReg)
-  //              .addImm(-SrcImm));
-  //   }
-  //   MI.eraseFromParent();
-  //   return true;
-  // }
-
+  const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
+  if (MI.getOpcode() == MtG::ADD_MACRO) {
+    auto DstReg = MI.getOperand(1).getReg();
+    auto SrcReg = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
+        .addUse(DstReg)
+        .addUse(SrcReg);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::ADD_IMM_MACRO) {
+    auto DstReg = MI.getOperand(1).getReg();
+    auto SrcImm = MI.getOperand(2).getImm();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(SrcImm);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
+        .addUse(DstReg)
+        .addUse(MtG::R0);
+    MI.eraseFromParent();
+    return true;
+  }
   // if (MI.getOpcode() == MtG::ADD_PSEUDO) {
   //   auto DstReg = MI.getOperand(0).getReg();
   //   auto SrcReg = MI.getOperand(1).getReg();

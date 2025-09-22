@@ -57,7 +57,6 @@ BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(MtG::R4);
   Reserved.set(MtG::R5);
   Reserved.set(MtG::R6);
-  Reserved.set(MtG::R7);
 
   return Reserved;
 }
@@ -77,7 +76,6 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     assert(i < MI.getNumOperands() && "Instr doesn't have FrameIndex operand!");
   }
   if (MI.getOpcode() == MtG::ADD_MACRO_FI) {
-    unsigned FrameReg = MtG::R1;
     const auto DstReg = MI.getOperand(0).getReg();
     const auto FrameIndex = MI.getOperand(1).getIndex();
     const auto Offset = MI.getOperand(2).getImm();
@@ -98,28 +96,35 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                        .addReg(MtG::R0));
     MI.eraseFromParent();
     return true;
-  } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO ||
-             MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
-    assert(i == 1);
-    int FrameIndex = MI.getOperand(i).getIndex();
-    uint64_t stackSize = MF.getFrameInfo().getStackSize();
-    int64_t spOffset = MF.getFrameInfo().getObjectOffset(FrameIndex);
-    int64_t Offset;
-    Offset = spOffset + (int64_t)stackSize;
-    if (!MI.isDebugValue() && !isInt<12>(Offset)) {
-      assert("(!MI.isDebugValue() && !isInt<12>(Offset))");
+  } else if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO ||
+             MI.getOpcode() == MtG::LOADBYTEWISE_FI_MACRO) {
+    const auto OpReg = MI.getOperand(0).getReg();
+    const auto FrameIndex = MI.getOperand(1).getIndex();
+    const int64_t totalOffset =
+        MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj;
+
+    const auto MRI = &MF.getRegInfo();
+    const auto tmpReg = MtG::R3; // MRI->createVirtualRegister(&MtG::GRRegClass);
+
+    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), tmpReg)
+                       .addUse(getFrameRegister(MF)));
+    MBB.insert(
+        II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
+
+    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), tmpReg)
+                       .addReg(tmpReg)
+                       .addReg(MtG::R0));
+
+    if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STOREBYTEWISE_MACRO))
+                         .addUse(tmpReg)
+                         .addUse(OpReg));
+    } else {
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)
+                         .addUse(tmpReg));
     }
-    MBB.insert(II,
-               BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(Offset));
-    MBB.insert(II,
-               BuildMI(MF, DL, TII->get(MtG::MOVE), MtG::R2).addReg(MtG::R0));
+    MI.eraseFromParent();
 
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), MtG::R2)
-                       .addUse(MtG::R2, RegState::Kill)
-                       .addUse(MtG::R1));
-    MI.getOperand(i + 0).ChangeToRegister(MtG::R2, false, false, true);
-
-    // MBB.erase(II);
     return true;
   }
   assert(false && "Unknown FrameIndex elimination!");

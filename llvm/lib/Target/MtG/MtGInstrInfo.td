@@ -122,13 +122,25 @@ def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
 
 def MOVE : CRRForm<0b1001, (outs GR:$dst), (ins  GR:$src),
                     "MOVE\t $dst, $src",[]>;  
+
+let Constraints = "$src1 = $dst" in {
+def ADD : CRRForm<0b0000, (outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "ADD\t $dst, $src2",[]>;  
+}
+
+
 let usesCustomInserter = 1, Defs = [R0] in 
 def NUMBUILD_MACRO : Pseudo<(outs ), (ins  mtgimm:$imm),
                     "NUMBUILD_MACRO\t $imm",[]>;
+def tFI : Operand<i32>;
 
-let usesCustomInserter = 1,  Defs = [R0, R1, R2, R3, R4, R5, R6, R7]in {
+let usesCustomInserter = 1 in {
+
+let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in 
 def LOADBYTEWISE_MACRO : Pseudo<(outs GR:$val), (ins  GR:$addr),
                     "LOADBYTEWISE_MACRO\t $val, $addr",[(set GR:$val, (load GR:$addr))]>;
+
+let hasSideEffects = 0, mayStore = 1, mayLoad = 0, isPseudo = 1 in
 def STOREBYTEWISE_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
                     "STOREBYTEWISE_MACRO\t $val, $addr",[(store GR:$val, GR:$addr)]>;
 
@@ -138,7 +150,8 @@ def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, mtgimm:$imm),
                     "STOREBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
 def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                 "MOVREG_MACRO\t $dst, $src1",[]>;
-
+def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
+                  "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
 let Constraints = "$src1 = $dst" in {
     def ADD_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "ADD_MACRO\t $dst, $src2",[(set GR:$dst, (add GR:$src1, GR:$src2))]>;
@@ -179,14 +192,18 @@ let Constraints = "$src1 = $dst" in {
                     "LT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setlt GR:$src1, GR:$src2))]>;
    def GT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "GT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setgt GR:$src1, GR:$src2))]>;
-  def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
-                    "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
+
   def SELECT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
                     "SELECT_MACRO\t $dst, $cond, $tval, $fval",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]>;
 }
 
+let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in
+def LOADBYTEWISE_FI_MACRO : Pseudo<(outs GR:$val), (ins  tFI:$fi),
+                    "",[]>;
 
-def tFI : Operand<i32>;
+let hasSideEffects = 0, mayStore = 1, mayLoad = 0, isPseudo = 1 in
+def STOREBYTEWISE_FI_MACRO : Pseudo<(outs), (ins GR:$val, tFI:$fi),
+                    "",[]>;
 
 def ADD_MACRO_FI : Pseudo<
   (outs GR:$dst), (ins tFI:$fi, mtgimm:$ofs),

@@ -81,11 +81,16 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   // // llvm_unreachable("debug");
   const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
   if (MI.getOpcode() == MtG::ADD_MACRO) {
-    auto DstReg = MI.getOperand(1).getReg();
+    auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(1UL << 32);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+        .addUse(DstReg)
+        .addUse(MtG::R0);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::ADD_IMM_MACRO) {
@@ -96,9 +101,70 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(1UL << 32);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+        .addUse(DstReg)
+        .addUse(MtG::R0);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::SUB_MACRO) {
+
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg = MI.getOperand(2).getReg();
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), SrcReg)
+        .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
+        .addUse(DstReg)
+        .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(1UL << 32);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+        .addUse(DstReg)
+        .addUse(MtG::R0);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::MULHI_MACRO) {
+    llvm_unreachable("MULHI_MACRO not implemented yet");
+  } else if (MI.getOpcode() == MtG::MULLO_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), DstReg)
+        .addUse(DstReg)
+        .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(1UL << 32);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+        .addUse(DstReg)
+        .addUse(MtG::R0);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::DIV_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg = MI.getOperand(2).getReg();
+    assert(DstReg != MtG::R0 && "DstReg cannot be R0");
+    assert(DstReg != MtG::R6 && "DstReg cannot be R6");
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
+        .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
+        .addUse(DstReg);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::REM_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg = MI.getOperand(2).getReg();
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
+        .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
+        .addUse(DstReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
+        .addUse(MtG::R6);
     MI.eraseFromParent();
     return true;
   }
+
   // if (MI.getOpcode() == MtG::ADD_PSEUDO) {
   //   auto DstReg = MI.getOperand(0).getReg();
   //   auto SrcReg = MI.getOperand(1).getReg();

@@ -468,6 +468,91 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     MI.eraseFromParent();
 
     break;
+  case MtG::AND_MACRO: {
+
+    auto *LoopMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    auto *ExitMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+
+    // 関数に挿入
+    MF.insert(std::next(MachineFunction::iterator(MBB)), LoopMBB);
+    MF.insert(std::next(MachineFunction::iterator(*LoopMBB)), ExitMBB);
+
+    ExitMBB->splice(ExitMBB->begin(), MBB,
+                    std::next(MachineBasicBlock::iterator(MI)), MBB->end());
+    ExitMBB->transferSuccessors(MBB);
+
+    MBB->addSuccessor(LoopMBB);
+    LoopMBB->addSuccessor(LoopMBB);
+    MBB->addSuccessor(ExitMBB);
+    Register Src1_0 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Src1_1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Src1_2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Src2_0 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Src2_1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Src2_2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    const auto DstReg = MI.getOperand(0).getReg();
+    const auto Src1Reg = MI.getOperand(1).getReg();
+    const auto Src2Reg = MI.getOperand(2).getReg();
+
+    BuildMI(MBB, DL, TII.get(MtG::MOVE), MtG::R3).addUse(Src1Reg);
+    BuildMI(MBB, DL, TII.get(MtG::ZERO), MtG::R4);
+
+    BuildMI(MBB, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(1ULL << 31);
+    BuildMI(MBB, DL, TII.get(MtG::MOVE), MtG::R7).addUse(MtG::R0);
+    BuildMI(MBB, DL, TII.get(MtG::MOVE), Src1_0).addUse(MtG::R3);
+    BuildMI(MBB, DL, TII.get(MtG::MOVE), Src2_0).addUse(Src2Reg);
+
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI), Src1_1)
+        .addReg(Src1_0)
+        .addMBB(MBB)
+        .addReg(Src1_2)
+        .addMBB(LoopMBB);
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI), Src2_1)
+        .addReg(Src2_0)
+        .addMBB(MBB)
+        .addReg(Src2_2)
+        .addMBB(LoopMBB);
+
+    BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), Src1_2)
+        .addUse(Src1_1)
+        .addUse(MtG::R7);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), MtG::R5);
+
+    BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), Src2_2)
+        .addUse(Src2_1)
+        .addUse(MtG::R7);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), MtG::R6);
+
+    BuildMI(LoopMBB, DL, TII.get(MtG::MULT), MtG::R5)
+        .addUse(MtG::R5)
+        .addUse(MtG::R6);
+
+    BuildMI(LoopMBB, DL, TII.get(MtG::FISZERO)).addUse(MtG::R5);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), MtG::R5);
+
+    BuildMI(LoopMBB, DL, TII.get(MtG::ADD), MtG::R4)
+        .addUse(MtG::R4)
+        .addUse(MtG::R4);
+    BuildMI(LoopMBB, DL, TII.get(MtG::ADD), MtG::R4)
+        .addUse(MtG::R4)
+        .addUse(MtG::R5);
+    BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), MtG::R7).addUse(MtG::R7);
+    BuildMI(LoopMBB, DL, TII.get(MtG::BRCOND_PSEUDO))
+        .addReg(MtG::R7)
+        .addMBB(LoopMBB);
+
+    BuildMI(LoopMBB, DL, TII.get(MtG::BR_PSEUDO)).addMBB(ExitMBB);
+
+    Register Src2_3 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Dst_0 = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    auto IP = ExitMBB->getFirstNonPHI();
+    BuildMI(*ExitMBB, IP, DL, TII.get(MtG::MOVE), DstReg)
+        .addUse(MtG::R4, RegState::Kill);
+    MI.eraseFromParent();
+    return ExitMBB;
+  }
   default:
     break;
   }

@@ -120,13 +120,6 @@ def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
           (CALL_PSEUDO tglobaladdr:$dst)>;
 
 
-def MOVE : CRRForm<0b1001, (outs GR:$dst), (ins  GR:$src),
-                    "MOVE\t $dst, $src",[]>;  
-
-let Constraints = "$src1 = $dst" in {
-def ADD : CRRForm<0b0000, (outs GR:$dst), (ins GR:$src1, GR:$src2),
-                    "ADD\t $dst, $src2",[]>;  
-}
 
 
 let usesCustomInserter = 1, Defs = [R0] in 
@@ -209,3 +202,62 @@ def ADD_MACRO_FI : Pseudo<
   (outs GR:$dst), (ins tFI:$fi, mtgimm:$ofs),
   "ADD_MACRO_FI\t$dst, [$fi+$ofs]",[]
 >;
+
+
+
+// NON-PSEUDO/MACRO INSTRUCTIONS
+
+
+def MOVE : CRRForm<0b1001, (outs GR:$dst), (ins  GR:$src),
+                    "Move\t $dst, $src",[]>;  
+
+def ZERO : CRRForm<0b1001, (outs GR:$dst), (ins),
+                    "Zero\t $dst",[]>;  
+
+let Constraints = "$src1 = $dst" in {
+
+def ADD : CRRForm<0b0000, (outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "Add\t $dst, $src2",[]>;
+                    
+def MULT : CRRForm<0b1010, (outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "Mult\t $dst, $src2",[]>;
+
+
+def DIVIDE : CCRForm<0b01000110, (outs GR:$dst), (ins GR:$src1),
+                    "Divide\t $dst ; $dst, R6 <- ($dst / R0, $dst % R0)",[]>{
+      let Uses = [R0];
+      let Defs = [R6];
+    }
+
+def SUBCOND : CRRForm<0b0001, (outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "SubCond\t $dst, $src2",[]>{
+                    let Defs = [FLAG];
+  }
+}
+
+def SETF: CRCForm<0b00100010, (outs GR:$dst), (ins),
+                    "SetF\t $dst",[]>{
+                    let Uses = [FLAG];
+}
+
+def SETNF: CRCForm<0b00100011, (outs GR:$dst), (ins),
+                    "SetNF\t $dst",[]>{
+                    let Uses = [FLAG];
+}
+
+// TODO change syntax 
+def FISZERO : CCRForm<0b00010000, (outs), (ins GR:$src1),
+                    "FIsZero\t $src1",[]>{
+                    let Defs = [FLAG];
+}
+
+def HALVE : CCRForm<0b01000010, (outs GR:$dst), (ins GR:$src1),
+                    "Halve\t $dst",[]>{
+                    let Constraints = "$dst = $src1";
+                    let Defs = [FLAG];
+}
+
+def JUMPBWDNF : CCRForm<0b00110011, (outs), (ins  brtarget:$brt),
+                    "JumpBwdNF\t $brt",[]>{
+                    let Uses = [FLAG, R0];    
+}

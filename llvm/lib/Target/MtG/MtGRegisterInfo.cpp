@@ -57,6 +57,7 @@ BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(MtG::R4);
   Reserved.set(MtG::R5);
   Reserved.set(MtG::R6);
+  Reserved.set(MtG::R7);
 
   return Reserved;
 }
@@ -104,7 +105,8 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
         MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj;
 
     const auto MRI = &MF.getRegInfo();
-    const auto tmpReg = MtG::R3; // MRI->createVirtualRegister(&MtG::GRRegClass);
+    const auto tmpReg =
+        MtG::R3; // MRI->createVirtualRegister(&MtG::GRRegClass);
 
     MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), tmpReg)
                        .addUse(getFrameRegister(MF)));

@@ -189,6 +189,18 @@ let Constraints = "$src1 = $dst" in {
   def SELECT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
                     "SELECT_MACRO\t $dst, $cond, $tval, $fval",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]>;
 }
+def : Pat<(i32  (setcc GR:$src1, GR:$src2, SETUGT)),
+          (GT_MACRO GR:$src1, GR:$src2)>;     
+
+def : Pat<(i32  (setcc GR:$src1, GR:$src2, SETULT)),
+          (LT_MACRO GR:$src1, GR:$src2)>;     
+
+def : Pat<(i32  (urem GR:$src1, GR:$src2)),
+          (REM_MACRO GR:$src1, GR:$src2)>;     
+
+def : Pat<(i32  (udiv GR:$src1, GR:$src2)),
+          (DIV_MACRO GR:$src1, GR:$src2)>;     
+
 
 let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in
 def LOADBYTEWISE_FI_MACRO : Pseudo<(outs GR:$val), (ins  tFI:$fi),

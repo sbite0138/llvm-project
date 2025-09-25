@@ -77,8 +77,10 @@ bool MtGTargetLowering::isIntDivCheap(EVT VT, AttributeList Attr) const {
 
 SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
-  default:
+  default: {
+    Op.dump();
     llvm_unreachable("unimplemented operand");
+  }
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
   }

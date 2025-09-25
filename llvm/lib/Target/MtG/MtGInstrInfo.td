@@ -230,7 +230,16 @@ let Constraints = "$src1 = $dst" in {
 
 def ADD : CRRForm<0b0000, (outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "Add\t $dst, $src2",[]>;
-                    
+
+def ADD1 : CCRForm<0b01000001, (outs GR:$dst), (ins GR:$src1),
+                    "Add1\t $dst",[]>;
+
+// 1111 means same as src1 (actual code is `1 Z Z`)
+def SUB1COND : CCRForm<0b00011111, (outs GR:$dst), (ins GR:$src1),
+                    "Sub1Cond\t $dst",[]>{
+                    let Defs = [FLAG];
+                  }
+
 def MULT : CRRForm<0b1010, (outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "Mult\t $dst, $src2",[]>;
 
@@ -272,4 +281,14 @@ def HALVE : CCRForm<0b01000010, (outs GR:$dst), (ins GR:$src1),
 def JUMPBWDNF : CCRForm<0b00110011, (outs), (ins  brtarget:$brt),
                     "JumpBwdNF\t $brt",[]>{
                     let Uses = [FLAG, R0];    
+}
+
+def STORE : CRRForm<0b1000, (outs), (ins GR:$addr,  GR:$val),
+                    "Store\t $addr, $val",[]>{
+                    let mayStore = 1;
+}
+
+def LOAD : CRRForm<0b1001, (outs  GR:$val), (ins GR:$addr),
+                    "Load\t $val, $addr",[]>{
+                    let mayLoad = 1;
 }

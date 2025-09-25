@@ -163,8 +163,98 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(MtG::R6);
     MI.eraseFromParent();
     return true;
-  }
+  } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO) {
+    auto AddrReg = MI.getOperand(0).getReg();
+    auto ValReg = MI.getOperand(1).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R3)
+        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
+        .addUse(ValReg);
 
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(256);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+        .addUse(MtG::R3)
+        .addUse(MtG::R6);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
+        .addUse(MtG::R3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+        .addUse(MtG::R3)
+        .addUse(MtG::R6);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
+        .addUse(MtG::R3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+        .addUse(MtG::R3)
+        .addUse(MtG::R6);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
+        .addUse(MtG::R3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+        .addUse(MtG::R3)
+        .addUse(MtG::R6);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
+    auto ValReg = MI.getOperand(0).getReg();
+    auto AddrReg = MI.getOperand(1).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO)).addImm(3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), AddrReg)
+        .addUse(AddrReg)
+        .addUse(MtG::R0);
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(256);
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
+        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrReg)
+        .addUse(AddrReg);
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
+        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrReg)
+        .addUse(AddrReg);
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
+        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R3);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrReg)
+        .addUse(AddrReg);
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
+        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R3);
+
+    MI.eraseFromParent();
+    return true;
+  }
   // if (MI.getOpcode() == MtG::ADD_PSEUDO) {
   //   auto DstReg = MI.getOperand(0).getReg();
   //   auto SrcReg = MI.getOperand(1).getReg();

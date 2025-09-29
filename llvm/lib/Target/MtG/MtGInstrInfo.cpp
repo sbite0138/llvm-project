@@ -127,11 +127,14 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(1UL << 32));
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
-        .addUse(DstReg)
-        .addUse(MtG::R0);
+
+    auto RemMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
     for (auto *NumBuildMI : NumBuildMIs)
       expandPostRAPseudo(*NumBuildMI);
+    expandPostRAPseudo(*RemMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::SUB_MACRO) {
@@ -151,10 +154,13 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     auto NumBuildMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(1UL << 32);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
-        .addUse(DstReg)
-        .addUse(MtG::R0);
+
+    auto RemMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
     expandPostRAPseudo(*NumBuildMI);
+    expandPostRAPseudo(*RemMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::MULHI_MACRO) {
@@ -173,10 +179,12 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     auto NumBuildMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(1UL << 32);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
-        .addUse(DstReg)
-        .addUse(MtG::R0);
+    auto RemMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
     expandPostRAPseudo(*NumBuildMI);
+    expandPostRAPseudo(*RemMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::DIV_MACRO) {

@@ -18,6 +18,7 @@
 #include "MtGTargetMachine.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Register.h"
@@ -100,13 +101,15 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(1UL << 32);
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1UL << 32);
     auto RemMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
             .addUse(DstReg)
             .addUse(MtG::R0);
     MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildMI);
     expandPostRAPseudo(*RemMI);
     return true;
   } else if (MI.getOpcode() == MtG::ADD_IMM_MACRO) {
@@ -114,17 +117,21 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     auto SrcImm = MI.getOperand(2).getImm();
     std::set<Register> UseRegs = {MtG::R0};
     assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(SrcImm);
+    std::vector<MachineInstr *> NumBuildMIs;
+    NumBuildMIs.push_back(
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(SrcImm));
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(1UL << 32);
+    NumBuildMIs.push_back(
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1UL << 32));
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
         .addUse(DstReg)
         .addUse(MtG::R0);
+    for (auto *NumBuildMI : NumBuildMIs)
+      expandPostRAPseudo(*NumBuildMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::SUB_MACRO) {
@@ -141,11 +148,13 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(1UL << 32);
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1UL << 32);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
         .addUse(DstReg)
         .addUse(MtG::R0);
+    expandPostRAPseudo(*NumBuildMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::MULHI_MACRO) {
@@ -161,11 +170,13 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(1UL << 32);
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1UL << 32);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
         .addUse(DstReg)
         .addUse(MtG::R0);
+    expandPostRAPseudo(*NumBuildMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::DIV_MACRO) {
@@ -214,8 +225,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
         .addUse(ValReg);
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(256);
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(256);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
         .addUse(MtG::R4);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
@@ -246,6 +258,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
            "Invalid AddrReg");
     assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
            "Invalid ValReg");
+    expandPostRAPseudo(*NumBuildMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
@@ -257,15 +270,18 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
            "Invalid ValReg");
 
+    std::vector<MachineInstr *> NumBuildMIs;
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO)).addImm(3);
+    NumBuildMIs.push_back(
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(3));
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), AddrReg)
         .addUse(AddrReg)
         .addUse(MtG::R0);
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
-        .addImm(256);
-
+    NumBuildMIs.push_back(
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(256));
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
         .addUse(AddrReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
@@ -304,6 +320,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
         .addUse(ValReg)
         .addUse(MtG::R3);
+
+    for (auto *NumBuildMI : NumBuildMIs)
+      expandPostRAPseudo(*NumBuildMI);
 
     MI.eraseFromParent();
     return true;
@@ -353,6 +372,21 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addImm(0);
     BuildMI(MBB, MBB.end(), MI.getDebugLoc(), TII.get(MtG::JUMPFWD))
         .addMBB(Target);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::NUMBUILD_MACRO) {
+    auto OrgImm = MI.getOperand(0).getImm();
+    std::vector<uint32_t> Imms;
+    while (OrgImm) {
+      Imms.push_back(OrgImm % 144);
+      OrgImm /= 144;
+    }
+    std::reverse(Imms.begin(), Imms.end());
+    for (auto Imm : Imms) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
+          .addImm(Imm / 12)
+          .addImm(Imm % 12);
+    }
     MI.eraseFromParent();
     return true;
   }

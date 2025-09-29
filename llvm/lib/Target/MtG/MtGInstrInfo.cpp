@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -27,6 +28,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <cassert>
 #include <cstdlib>
+#include <set>
+#include <vector>
 
 using namespace llvm;
 
@@ -45,10 +48,6 @@ void MtGInstrInfo::storeRegToStackSlot(
     bool isKill, int FrameIdx, const TargetRegisterClass *RC,
     const TargetRegisterInfo *TRI, Register VReg) const {
 
-  // check RC is GRRegClass
-  // assert(RC == &MtG::GRRegClass && "Can only store GRRegClass to stack
-  // slot");
-  // auto TmpReg2 = MtG::R10;
   assert(SrcReg != MtG::FLAG && "Cannot store FLAG register to stack slot");
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_FI_MACRO))
       .addUse(SrcReg)
@@ -78,24 +77,44 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
-  // // llvm_unreachable("debug");
   const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
+
+  auto splitAfterIfNeeded = [&](MachineBasicBlock &Block,
+                                MachineInstr &At) -> MachineBasicBlock * {
+    auto Next = std::next(At.getIterator());
+    if (Next == Block.end())
+      return nullptr;                // 末尾なら分割不要
+    MachineInstr &SplitHere = *Next; // ← MachineInstr& にする
+    // UpdateLiveIns/UpdateCFG は true が無難
+    return Block.splitAt(SplitHere, /*UpdateLiveIns=*/true);
+  };
+
   if (MI.getOpcode() == MtG::ADD_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
+           "Invalid SrcReg - register conflicts with macro expansion");
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
         .addImm(1UL << 32);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
-        .addUse(DstReg)
-        .addUse(MtG::R0);
+    auto RemMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
     MI.eraseFromParent();
+    expandPostRAPseudo(*RemMI);
     return true;
   } else if (MI.getOpcode() == MtG::ADD_IMM_MACRO) {
     auto DstReg = MI.getOperand(1).getReg();
     auto SrcImm = MI.getOperand(2).getImm();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
         .addImm(SrcImm);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
@@ -112,6 +131,10 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
+           "Invalid SrcReg - register conflicts with macro expansion");
 
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), SrcReg)
         .addUse(SrcReg);
@@ -130,6 +153,11 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::MULLO_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
+           "Invalid SrcReg - register conflicts with macro expansion");
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);
@@ -143,6 +171,10 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::DIV_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
+           "Invalid SrcReg - register conflicts with macro expansion");
     assert(DstReg != MtG::R0 && "DstReg cannot be R0");
     assert(DstReg != MtG::R6 && "DstReg cannot be R6");
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
@@ -154,9 +186,18 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::REM_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
+    std::set<Register> UseRegs = {MtG::R0, MtG::R6};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
+           "Invalid SrcReg - register conflicts with macro expansion");
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
-        .addUse(SrcReg);
+    assert(DstReg != MtG::R0 && "DstReg cannot be R0");
+    assert(SrcReg != MtG::R6 && "SrcReg cannot be R6");
+    assert(DstReg != MtG::R6 && "DstReg cannot be R6");
+    if (SrcReg != MtG::R0) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
+          .addUse(SrcReg);
+    }
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
         .addUse(DstReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
@@ -166,6 +207,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO) {
     auto AddrReg = MI.getOperand(0).getReg();
     auto ValReg = MI.getOperand(1).getReg();
+    std::set<Register> UseRegs = {MtG::R0, MtG::R3, MtG::R4, MtG::R6};
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R3)
         .addUse(AddrReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
@@ -199,11 +242,21 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
         .addUse(MtG::R3)
         .addUse(MtG::R6);
+    assert((UseRegs.count(AddrReg) == 0 || !isRegisterLiveAfter(MI, AddrReg)) &&
+           "Invalid AddrReg");
+    assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
+           "Invalid ValReg");
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
+    std::set<Register> UseRegs = {MtG::R0, MtG::R3, MtG::R4, MtG::R6};
+    assert((UseRegs.count(AddrReg) == 0 || !isRegisterLiveAfter(MI, AddrReg)) &&
+           "Invalid AddrReg");
+    assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
+           "Invalid ValReg");
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO)).addImm(3);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), AddrReg)
@@ -254,101 +307,99 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
     MI.eraseFromParent();
     return true;
+  } else if (MI.getOpcode() == MtG::REM_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg = MI.getOperand(2).getReg();
+    std::set<Register> UseRegs = {MtG::R0, MtG::R6};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
+           "Invalid SrcReg - register conflicts with macro expansion");
+
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
+        .addUse(SrcReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
+        .addUse(DstReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
+        .addUse(MtG::R6);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::BRCOND_PSEUDO) {
+
+    MachineBasicBlock *Tail = splitAfterIfNeeded(MBB, MI);
+    (void)Tail;
+    auto CondReg = MI.getOperand(0).getReg();
+    auto Target = MI.getOperand(1).getMBB();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
+        .addImm(0)
+        .addImm(0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
+        .addImm(0)
+        .addImm(0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FISZERO)).addUse(CondReg);
+    BuildMI(MBB, MBB.end(), MI.getDebugLoc(), TII.get(MtG::JUMPFWDNF))
+        .addMBB(Target);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::BR_PSEUDO) {
+
+    MachineBasicBlock *Tail = splitAfterIfNeeded(MBB, MI);
+    (void)Tail;
+    auto Target = MI.getOperand(0).getMBB();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
+        .addImm(0)
+        .addImm(0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
+        .addImm(0)
+        .addImm(0);
+    BuildMI(MBB, MBB.end(), MI.getDebugLoc(), TII.get(MtG::JUMPFWD))
+        .addMBB(Target);
+    MI.eraseFromParent();
+    return true;
   }
-  // if (MI.getOpcode() == MtG::ADD_PSEUDO) {
-  //   auto DstReg = MI.getOperand(0).getReg();
-  //   auto SrcReg = MI.getOperand(1).getReg();
-  //   auto SrcImm = MI.getOperand(2).getImm();
-  //   assert(DstReg == SrcReg);
 
-  //   expandPostRAPseudo(*BuildMI(MBB, MI, MI.getDebugLoc(),
-  //                               TII.get(MtG::NUMBUILD_PSEUDO), MtG::R0)
-  //                           .addImm(SrcImm));
-  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
-  //       .addUse(SrcReg)
-  //       .addUse(MtG::R0);
-  //   MI.eraseFromParent();
-  //   return true;
-  // }
+  return false;
+}
 
-  // if (MI.getOpcode() == MtG::SUB_PSEUDO) {
-  //   auto DstReg = MI.getOperand(0).getReg();
-  //   auto SrcReg = MI.getOperand(1).getReg();
-  //   auto SrcImm = MI.getOperand(2).getImm();
-  //   expandPostRAPseudo(*BuildMI(MBB, MI, MI.getDebugLoc(),
-  //                               TII.get(MtG::NUMBUILD_PSEUDO), MtG::R0)
-  //                           .addImm(SrcImm));
-  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB), DstReg)
-  //       .addUse(SrcReg)
-  //       .addUse(MtG::R0);
-  //   MI.eraseFromParent();
-  //   return true;
-  // }
+bool MtGInstrInfo::isRegisterLiveAfter(const MachineInstr &MI,
+                                       Register Reg) const {
+  const MachineBasicBlock *MBB = MI.getParent();
+  const MachineFunction *MF = MBB->getParent();
 
-  // if (MI.getOpcode() == MtG::NUMBUILD_PSEUDO) {
-  //   auto Imm = MI.getOperand(1).getImm();
-  //   assert(Imm >= 0);
+  // Analyze within the same basic block
+  MachineBasicBlock::const_iterator NextI = std::next(MI.getIterator());
+  for (auto I = NextI; I != MBB->end(); ++I) {
+    // Check if the register is read (used)
+    if (I->readsRegister(Reg, &getRegisterInfo())) {
+      llvm::dbgs() << "Register " << printReg(Reg, &getRegisterInfo())
+                   << " is live after instruction: " << *I << "\n";
+      llvm::dbgs() << "In function: " << MF->getName() << "\n";
+      llvm::dbgs() << "In basic block: " << MBB->getName() << "\n";
+      llvm::dbgs() << "In instruction: ";
+      MI.dump();
 
-  //   // assert(Imm > 0);
-  //   std::vector<unsigned> Digits;
-  //   if (Imm == 0)
-  //     Digits.push_back(0);
-  //   else
-  //     while (Imm > 0) {
-  //       Digits.push_back(Imm % 144);
-  //       Imm /= 144;
-  //     }
-  //   std::reverse(Digits.begin(), Digits.end());
+      MF->dump();
+      return true;
+    }
+    // Check if the register is redefined (killed)
+    if (I->definesRegister(Reg, &getRegisterInfo())) {
+      return false;
+    }
+  }
 
-  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
-  //       .addDef(MI.getOperand(0).getReg())
-  //       .addImm(Digits[0]);
-
-  //   for (unsigned i = 1; i < Digits.size(); i++) {
-  //     unsigned Digit = Digits[i];
-  //     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
-  //         .addDef(MI.getOperand(0).getReg())
-  //         .addUse(MI.getOperand(0).getReg(), RegState::Kill)
-  //         .addImm(Digit);
-  //   }
-  //   MI.eraseFromParent();
-  //   return true;
-  // }
-
-  // if (MI.getOpcode() == MtG::MOV_PSEUDO) {
-
-  //   auto Imm = MI.getOperand(1).getImm();
-  //   assert(Imm >= 0);
-  //   // MI.dump();
-  //   // llvm::dbgs() << "MOV_PSEUDO Imm: " << Imm << "\n";
-
-  //   std::vector<unsigned> Digits;
-  //   if (Imm == 0)
-  //     Digits.push_back(0);
-  //   else
-  //     while (Imm > 0) {
-  //       Digits.push_back(Imm % 144);
-  //       Imm /= 144;
-  //     }
-  //   std::reverse(Digits.begin(), Digits.end());
-
-  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_INIT))
-  //       .addDef(MtG::R0)
-  //       .addImm(Digits[0]);
-
-  //   for (unsigned i = 1; i < Digits.size(); i++) {
-  //     unsigned Digit = Digits[i];
-  //     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_SUCC))
-  //         .addDef(MtG::R0)
-  //         .addUse(MtG::R0, RegState::Kill)
-  //         .addImm(Digit);
-  //   }
-  //   BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOV_GG))
-  //       .addDef(MI.getOperand(0).getReg())
-  //       .addUse(MtG::R0);
-  //   MI.eraseFromParent();
-  //   return true;
-  // }
+  // Check across basic block boundaries
+  // If the register is live-in to any successor block, it's live
+  for (MachineBasicBlock *Succ : MBB->successors()) {
+    if (Succ->isLiveIn(Reg)) {
+      llvm::dbgs() << "Register " << printReg(Reg, &getRegisterInfo())
+                   << " is live after instruction: " << *Succ << "\n";
+      llvm::dbgs() << "In function: " << MF->getName() << "\n";
+      llvm::dbgs() << "In basic block: " << MBB->getName() << "\n";
+      llvm::dbgs() << "In instruction: ";
+      MI.dump();
+      MF->dump();
+      return true;
+    }
+  }
 
   return false;
 }

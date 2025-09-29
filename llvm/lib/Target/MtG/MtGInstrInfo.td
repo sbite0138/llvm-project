@@ -102,7 +102,7 @@ def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
 
   
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0]  in 
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0, FLAG]  in 
 def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
                     "BRCOND_PSEUDO $cond, $imm",[(brcond GR:$cond, bb:$imm)]> {
                     }
@@ -226,6 +226,12 @@ def MOVE : CRRForm<0b1001, (outs GR:$dst), (ins  GR:$src),
 def ZERO : CRRForm<0b1001, (outs GR:$dst), (ins),
                     "Zero\t $dst",[]>;  
 
+def NUMBUILD: CIIForm<0b1010, (outs), (ins mtgimm:$imm1, mtgimm:$imm2),
+                    "NumBuild\t $imm1, $imm2",[]>{
+                    let Defs = [R0];
+}
+
+
 let Constraints = "$src1 = $dst" in {
 
 def ADD : CRRForm<0b0000, (outs GR:$dst), (ins GR:$src1, GR:$src2),
@@ -278,10 +284,24 @@ def HALVE : CCRForm<0b01000010, (outs GR:$dst), (ins GR:$src1),
                     let Defs = [FLAG];
 }
 
+let isBarrier = 1, isBranch = 1, isTerminator = 1 in
+def JUMPFWD : CCCForm<0b001100000000, (outs), (ins  brtarget:$brt),
+                    "JumpFwd\t $brt",[]>{
+                    let Uses = [R0];    
+}
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1 in
+def JUMPFWDNF : CCCForm<0b001100000000, (outs), (ins  brtarget:$brt),
+                    "JumpFwdNF\t $brt",[]>{
+                    let Uses = [R0, FLAG];    
+}
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1 in
 def JUMPBWDNF : CCRForm<0b00110011, (outs), (ins  brtarget:$brt),
                     "JumpBwdNF\t $brt",[]>{
-                    let Uses = [FLAG, R0];    
+                    let Uses = [R0, FLAG];
 }
+
 
 def STORE : CRRForm<0b1000, (outs), (ins GR:$addr,  GR:$val),
                     "Store\t $addr, $val",[]>{
@@ -292,3 +312,5 @@ def LOAD : CRRForm<0b1001, (outs  GR:$val), (ins GR:$addr),
                     "Load\t $val, $addr",[]>{
                     let mayLoad = 1;
 }
+
+

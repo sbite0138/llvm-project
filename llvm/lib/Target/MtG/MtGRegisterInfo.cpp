@@ -105,9 +105,9 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
         MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj;
 
     const auto MRI = &MF.getRegInfo();
-    const auto tmpReg =
-        MtG::R3; // MRI->createVirtualRegister(&MtG::GRRegClass);
 
+    // get virtual register for temporary use
+    const auto tmpReg = MtG::R7;
     MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), tmpReg)
                        .addUse(getFrameRegister(MF)));
     MBB.insert(

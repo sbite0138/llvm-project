@@ -78,6 +78,10 @@ public:
     assert(I.getOperand(1).getImm() >= 0 && "Size must not be negative");
     return I.getOperand(1).getImm();
   }
+
+private:
+  /// Check if a register is live (used) after the given instruction
+  bool isRegisterLiveAfter(const MachineInstr &MI, Register Reg) const;
 };
 
 } // namespace llvm

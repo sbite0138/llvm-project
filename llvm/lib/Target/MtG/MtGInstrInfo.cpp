@@ -85,10 +85,16 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
                                 MachineInstr &At) -> MachineBasicBlock * {
     auto Next = std::next(At.getIterator());
     if (Next == Block.end())
-      return nullptr;                // 末尾なら分割不要
-    MachineInstr &SplitHere = *Next; // ← MachineInstr& にする
-    // UpdateLiveIns/UpdateCFG は true が無難
+      return nullptr;
+    MachineInstr &SplitHere = *Next;
     return Block.splitAt(SplitHere, /*UpdateLiveIns=*/true);
+  };
+  auto ensureNoTerminatorTail = [&](MachineBasicBlock &B) {
+    auto FT = B.getFirstTerminator();
+    if (FT != B.end()) {
+      auto &SplitHere = *FT;
+      B.splitAt(SplitHere, /*UpdateLiveIns=*/true);
+    }
   };
 
   if (MI.getOpcode() == MtG::ADD_MACRO) {
@@ -353,6 +359,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return true;
   } else if (MI.getOpcode() == MtG::BRCOND_PSEUDO) {
 
+    ensureNoTerminatorTail(MBB);
     MachineBasicBlock *Tail = splitAfterIfNeeded(MBB, MI);
     (void)Tail;
     auto CondReg = MI.getOperand(0).getReg();
@@ -369,7 +376,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::BR_PSEUDO) {
-
+    ensureNoTerminatorTail(MBB);
     MachineBasicBlock *Tail = splitAfterIfNeeded(MBB, MI);
     (void)Tail;
     auto Target = MI.getOperand(0).getMBB();

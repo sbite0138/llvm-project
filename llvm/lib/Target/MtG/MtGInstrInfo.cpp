@@ -385,6 +385,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return true;
   } else if (MI.getOpcode() == MtG::NUMBUILD_MACRO) {
     auto OrgImm = MI.getOperand(0).getImm();
+    if (OrgImm < 0) {
+      OrgImm = (1ULL << 32) + OrgImm;
+    }
     std::vector<uint32_t> Imms;
     while (OrgImm) {
       Imms.push_back(OrgImm % 144);

@@ -397,6 +397,48 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     MI.eraseFromParent();
     return true;
+  } else if (MI.getOpcode() == MtG::EQ_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg1 = MI.getOperand(1).getReg();
+    auto SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg1)
+        .addUse(SrcReg2);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg2)
+        .addUse(SrcReg1);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETNF), DstReg);
+    MI.eraseFromParent();
+  } else if (MI.getOpcode() == MtG::NEQ_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg1 = MI.getOperand(1).getReg();
+    auto SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg1)
+        .addUse(SrcReg2);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg2)
+        .addUse(SrcReg1);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+  } else if (MI.getOpcode() == MtG::LT_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg1 = MI.getOperand(1).getReg();
+    auto SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg1)
+        .addUse(SrcReg2);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+  } else if (MI.getOpcode() == MtG::GT_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg1 = MI.getOperand(1).getReg();
+    auto SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg2)
+        .addUse(SrcReg1);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
   }
 
   return false;

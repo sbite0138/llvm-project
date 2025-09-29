@@ -278,6 +278,12 @@ def FISZERO : CCRForm<0b00010000, (outs), (ins GR:$src1),
                     let Defs = [FLAG];
 }
 
+def FLESS : CRRForm<0b1011, (outs), (ins GR:$src1, GR:$src2),
+                    "FLess\t $src1, $src2",[]>{
+                    let Defs = [FLAG];
+}
+
+
 def HALVE : CCRForm<0b01000010, (outs GR:$dst), (ins GR:$src1),
                     "Halve\t $dst",[]>{
                     let Constraints = "$dst = $src1";

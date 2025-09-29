@@ -65,7 +65,7 @@ def brtarget : Operand<OtherVT>{
 //
 
 let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {
-  def RET  : Pseudo<(outs), (ins), "ret",  [(MtGretglue)]> {
+  def RET_PSEUDO  : Pseudo<(outs), (ins), "RET_PSEUDO",  [(MtGretglue)]> {
   }
 }
 
@@ -319,4 +319,12 @@ def LOAD : CRRForm<0b1001, (outs  GR:$val), (ins GR:$addr),
                     let mayLoad = 1;
 }
 
+def OUTPUT : CCRForm<0b01000011, (outs ), (ins GR:$val),
+                    "Output\t $val",[]>{
+}
 
+
+let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {
+  def RETURN  : Pseudo<(outs), (ins), "Return 0",  []> {
+  }
+}

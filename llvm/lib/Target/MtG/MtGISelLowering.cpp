@@ -470,22 +470,6 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     MI.eraseFromParent();
 
     break;
-  // case MtG::BR_PSEUDO {
-  //   BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
-  //       .addImm(MI.getOperand(0).getImm());
-  //   BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
-  //       .addImm(MI.getOperand(0).getImm());
-  //   BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
-  //       .addImm(MI.getOperand(0).getImm());
-  //   BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
-  //       .addImm(MI.getOperand(0).getImm());
-  //   BuildMI(*MBB, MI, DL, TII.get(MtG::MOVE), MI.getOperand(0).getReg())
-  //       .addReg(MtG::R0);
-
-  //   MI.eraseFromParent();
-
-  //   break;
-  // }
   case MtG::AND_MACRO: {
 
     auto *LoopMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());

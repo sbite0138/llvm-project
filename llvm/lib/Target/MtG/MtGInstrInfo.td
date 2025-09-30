@@ -94,20 +94,15 @@ def NOP : CCCForm<0b000000000000,
                     }
 
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0]  in 
+let isBarrier = 1, isBranch = 1, isTerminator = 1, usesCustomInserter = 1, Defs = [R0]  in 
 def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
-                    "BR_PSEUDO $imm",[(br bb:$imm)]> {
-                        let usesCustomInserter = 1;
-                    }
+                    "BR_PSEUDO $imm",[(br bb:$imm)]>;
 
   
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0, FLAG]  in 
+let isBarrier = 1, isBranch = 1, isTerminator = 1, usesCustomInserter = 1, Defs = [R0, FLAG]  in 
 def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
-                    "BRCOND_PSEUDO $cond, $imm",[(brcond GR:$cond, bb:$imm)]> {
-                    }
-
-
+                    "BRCOND_PSEUDO $cond, $imm",[(brcond GR:$cond, bb:$imm)]>;
 
 let isCall = 1, Defs = [R0], isCodeGenOnly = 0 in {
   def CALL_PSEUDO : Pseudo<(outs), (ins calltarget:$src),

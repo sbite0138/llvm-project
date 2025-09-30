@@ -81,22 +81,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineFunction &MF = *MBB.getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
 
-  auto splitAfterIfNeeded = [&](MachineBasicBlock &Block,
-                                MachineInstr &At) -> MachineBasicBlock * {
-    auto Next = std::next(At.getIterator());
-    if (Next == Block.end())
-      return nullptr;
-    MachineInstr &SplitHere = *Next;
-    return Block.splitAt(SplitHere, /*UpdateLiveIns=*/true);
-  };
-  auto ensureNoTerminatorTail = [&](MachineBasicBlock &B) {
-    auto FT = B.getFirstTerminator();
-    if (FT != B.end()) {
-      auto &SplitHere = *FT;
-      B.splitAt(SplitHere, /*UpdateLiveIns=*/true);
-    }
-  };
-
   if (MI.getOpcode() == MtG::ADD_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
@@ -357,39 +341,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(MtG::R6);
     MI.eraseFromParent();
     return true;
-  } else if (MI.getOpcode() == MtG::BRCOND_PSEUDO) {
-
-    ensureNoTerminatorTail(MBB);
-    MachineBasicBlock *Tail = splitAfterIfNeeded(MBB, MI);
-    (void)Tail;
-    auto CondReg = MI.getOperand(0).getReg();
-    auto Target = MI.getOperand(1).getMBB();
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
-        .addImm(0)
-        .addImm(0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
-        .addImm(0)
-        .addImm(0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FISZERO)).addUse(CondReg);
-    BuildMI(MBB, MBB.end(), MI.getDebugLoc(), TII.get(MtG::JUMPFWDNF))
-        .addMBB(Target);
-    MI.eraseFromParent();
-    return true;
-  } else if (MI.getOpcode() == MtG::BR_PSEUDO) {
-    ensureNoTerminatorTail(MBB);
-    MachineBasicBlock *Tail = splitAfterIfNeeded(MBB, MI);
-    (void)Tail;
-    auto Target = MI.getOperand(0).getMBB();
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
-        .addImm(0)
-        .addImm(0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
-        .addImm(0)
-        .addImm(0);
-    BuildMI(MBB, MBB.end(), MI.getDebugLoc(), TII.get(MtG::JUMPFWD))
-        .addMBB(Target);
-    MI.eraseFromParent();
-    return true;
   } else if (MI.getOpcode() == MtG::NUMBUILD_MACRO) {
     auto OrgImm = MI.getOperand(0).getImm();
     if (OrgImm < 0) {
@@ -453,8 +404,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::CALL_PSEUDO) {
     auto Callee = MI.getOperand(0).getGlobal()->getName();
     if (Callee == "wrap_putchar") {
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::OUTPUT))
-          .addUse(MtG::R8, RegState::Kill);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::OUTPUT)).addUse(MtG::R8);
       MI.eraseFromParent();
       return true;
     }

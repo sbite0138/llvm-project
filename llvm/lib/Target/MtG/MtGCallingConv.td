@@ -19,7 +19,7 @@ def RetCC_MtG : CallingConv<[
 // MtG Argument Calling Conventions
 //===----------------------------------------------------------------------===//
 def CC_MtG : CallingConv<[
-  CCIfType<[i32], CCAssignToReg<[R8, R9]>>,
+  CCIfType<[i32], CCAssignToReg<[R8]>>,
   CCIfType<[i32], CCAssignToStack<4, 4>>,
 ]>;
 

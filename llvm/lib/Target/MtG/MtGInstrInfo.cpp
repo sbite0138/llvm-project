@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Debug.h"
@@ -80,7 +81,15 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget<MtGSubtarget>().getInstrInfo();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
 
+  auto BuildSafeMove = [&](MachineBasicBlock &MBB, MachineInstr &MI,
+                           const DebugLoc &DL, const TargetInstrInfo &TII,
+                           MCRegister DstReg, MCRegister SrcReg) {
+    if (DstReg != SrcReg)
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
+          .addUse(SrcReg);
+  };
   if (MI.getOpcode() == MtG::ADD_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
@@ -136,7 +145,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
     assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
            "Invalid SrcReg - register conflicts with macro expansion");
-
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), SrcReg)
         .addUse(SrcReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
@@ -191,34 +199,18 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(SrcReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
         .addUse(DstReg);
-    MI.eraseFromParent();
-    return true;
-  } else if (MI.getOpcode() == MtG::REM_MACRO) {
-    auto DstReg = MI.getOperand(0).getReg();
-    auto SrcReg = MI.getOperand(2).getReg();
-    std::set<Register> UseRegs = {MtG::R0, MtG::R6};
-    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
-    assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
-           "Invalid SrcReg - register conflicts with macro expansion");
-
-    assert(DstReg != MtG::R0 && "DstReg cannot be R0");
-    assert(SrcReg != MtG::R6 && "SrcReg cannot be R6");
-    assert(DstReg != MtG::R6 && "DstReg cannot be R6");
-    if (SrcReg != MtG::R0) {
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
-          .addUse(SrcReg);
-    }
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
-        .addUse(DstReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
-        .addUse(MtG::R6);
+    if (DstReg != MtG::R6)
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
+          .addUse(MtG::R6);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO) {
-    auto AddrReg = MI.getOperand(0).getReg();
-    auto ValReg = MI.getOperand(1).getReg();
-    std::set<Register> UseRegs = {MtG::R0, MtG::R3, MtG::R4, MtG::R6};
-
+    auto ValReg = MI.getOperand(0).getReg();
+    auto AddrReg = MI.getOperand(1).getReg();
+    // print register in string format
+    std::set<Register> UseRegs = {MtG::R0, MtG::R3, MtG::R4, MtG::R5, MtG::R6};
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R5)
+        .addUse(AddrReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R3)
         .addUse(AddrReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
@@ -231,6 +223,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(MtG::R4);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
         .addUse(MtG::R3)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
         .addUse(MtG::R6);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
         .addUse(MtG::R3);
@@ -238,6 +232,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(MtG::R4);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
         .addUse(MtG::R3)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
         .addUse(MtG::R6);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
         .addUse(MtG::R3);
@@ -245,14 +241,17 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(MtG::R4);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
         .addUse(MtG::R3)
+        .addUse(MtG::R4);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R4)
         .addUse(MtG::R6);
+
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
         .addUse(MtG::R3);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
         .addUse(MtG::R4);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
         .addUse(MtG::R3)
-        .addUse(MtG::R6);
+        .addUse(MtG::R4);
     assert((UseRegs.count(AddrReg) == 0 || !isRegisterLiveAfter(MI, AddrReg)) &&
            "Invalid AddrReg");
     assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
@@ -263,62 +262,67 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
-    std::set<Register> UseRegs = {MtG::R0, MtG::R3, MtG::R4, MtG::R6};
-    assert((UseRegs.count(AddrReg) == 0 || !isRegisterLiveAfter(MI, AddrReg)) &&
-           "Invalid AddrReg");
-    assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
-           "Invalid ValReg");
+    llvm::dbgs() << "Expanding LOADBYTEWISE_MACRO\n";
+    llvm::dbgs() << "AddrReg" << TRI->getName(AddrReg) << "\n";
+    llvm::dbgs() << "ValReg" << TRI->getName(ValReg) << "\n";
 
+    std::vector<Register> WorkRegs = {MtG::R3, MtG::R4, MtG::R5, MtG::R6};
+    erase(WorkRegs, AddrReg);
+    erase(WorkRegs, ValReg);
+    const auto AddrWorkReg = WorkRegs.at(0);
+    const auto ValWorkReg = WorkRegs.at(1);
     std::vector<MachineInstr *> NumBuildMIs;
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), AddrWorkReg)
+        .addUse(AddrReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(3));
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), AddrReg)
-        .addUse(AddrReg)
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), AddrWorkReg)
+        .addUse(AddrWorkReg)
         .addUse(MtG::R0);
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(256));
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
+        .addUse(AddrWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
         .addUse(ValReg)
-        .addUse(MtG::R3);
+        .addUse(ValWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
         .addUse(ValReg)
         .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrReg)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrWorkReg)
+        .addUse(AddrWorkReg);
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
+        .addUse(AddrWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
         .addUse(ValReg)
-        .addUse(MtG::R3);
+        .addUse(ValWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
         .addUse(ValReg)
         .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrReg)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrWorkReg)
+        .addUse(AddrWorkReg);
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
+        .addUse(AddrWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
         .addUse(ValReg)
-        .addUse(MtG::R3);
+        .addUse(ValWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
         .addUse(ValReg)
         .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrReg)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrWorkReg)
+        .addUse(AddrWorkReg);
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R3)
-        .addUse(AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
+        .addUse(AddrWorkReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
         .addUse(ValReg)
-        .addUse(MtG::R3);
+        .addUse(ValWorkReg);
 
     for (auto *NumBuildMI : NumBuildMIs)
       expandPostRAPseudo(*NumBuildMI);
@@ -332,13 +336,12 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
     assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
            "Invalid SrcReg - register conflicts with macro expansion");
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
-        .addUse(SrcReg);
+    if (SrcReg != MtG::R0) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), MtG::R0)
+          .addUse(SrcReg);
+    }
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
         .addUse(DstReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
-        .addUse(MtG::R6);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::NUMBUILD_MACRO) {
@@ -350,6 +353,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     while (OrgImm) {
       Imms.push_back(OrgImm % 144);
       OrgImm /= 144;
+    }
+    if (Imms.size() == 0) {
+      Imms.push_back(0);
     }
     std::reverse(Imms.begin(), Imms.end());
     for (auto Imm : Imms) {

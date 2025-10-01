@@ -12,6 +12,7 @@
 
 #include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
+#include "MtGISelLowering.h"
 #include "MtGTargetMachine.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -134,11 +135,15 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
     return;
   }
   unsigned Opcode = Node->getOpcode();
-  EVT VT = Node->getValueType(0);
-
   switch (Opcode) {
   default:
     break;
+  case MtGISD::OUTPUT: {
+    SDValue Chain = Node->getOperand(0);
+    // Select the pseudo OUTPUT node into the real hardware instruction.
+    CurDAG->SelectNodeTo(Node, MtG::OUTPUT, MVT::Other, Chain);
+    return;
+  }
   case ISD::FrameIndex: {
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();
     SDValue FIVal = CurDAG->getTargetFrameIndex(FI, PtrVT); // ★非Target版

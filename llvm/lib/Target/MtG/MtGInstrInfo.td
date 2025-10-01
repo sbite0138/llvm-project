@@ -116,13 +116,12 @@ def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
 
 
 
-
 let usesCustomInserter = 1, Defs = [R0] in 
 def NUMBUILD_MACRO : Pseudo<(outs ), (ins  mtgimm:$imm),
                     "NUMBUILD_MACRO\t $imm",[]>;
 def tFI : Operand<i32>;
 
-let usesCustomInserter = 1 in {
+let usesCustomInserter = 1, Defs = [R0, R1, R2, R3, R4, R5, R6, R7] in {
 
 let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in 
 def LOADBYTEWISE_MACRO : Pseudo<(outs GR:$val), (ins  GR:$addr),
@@ -314,9 +313,22 @@ def LOAD : CRRForm<0b1001, (outs  GR:$val), (ins GR:$addr),
                     let mayLoad = 1;
 }
 
-def OUTPUT : CCRForm<0b01000011, (outs ), (ins GR:$val),
-                    "Output\t $val",[]>{
+
+
+
+
+def SDT_MtGOutput
+  : SDTypeProfile<1, 0, [ SDTCisVT<0, OtherVT> ]>;
+
+def MtGISD_OUTPUT
+  : SDNode<"MtGISD::OUTPUT", SDT_MtGOutput, [SDNPHasChain]>;
+
+let hasSideEffects = 1, Uses = [R8] in
+def OUTPUT : CCRForm<0b01000011, (outs ), (ins),
+                    "Output\t r8",[]>{
 }
+
+def : Pat<(MtGISD_OUTPUT), (OUTPUT)>;
 
 
 let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {

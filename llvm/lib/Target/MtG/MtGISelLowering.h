@@ -69,6 +69,7 @@ enum NodeType : unsigned {
   /// TODO Nothing generates a node of this type yet.
   DADD,
   WRAP_ADDR, // Wrap address node for global addresses.
+  OUTPUT,
 };
 }
 

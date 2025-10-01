@@ -146,10 +146,36 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                      SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
   SDLoc &dl = CLI.DL;
+  SDValue Chain = CLI.Chain;
+
+  auto isPutchar = [&] {
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(CLI.Callee))
+      if (const Function *F = dyn_cast<Function>(GA->getGlobal()))
+        return F->getName() == "wrap_putchar" && F->arg_size() == 1;
+    if (auto *ES = dyn_cast<ExternalSymbolSDNode>(CLI.Callee))
+      return StringRef(ES->getSymbol()) == "wrap_putchar";
+    return false;
+  }();
+  if (isPutchar) {
+    assert(CLI.OutVals.size() == 1 && "wrap_putchar expects 1 arg");
+    SDValue Arg = CLI.OutVals[0]; // 72
+    SDLoc DL = CLI.DL;
+
+    // まず R8 に値を入れる（必要ならここで即値→レジスタ化）
+    SDValue CT = DAG.getCopyToReg(Chain, DL, MtG::R8, Arg);
+    Chain = CT.getValue(0); // Glue は使わないなら読まない
+
+    // その後、オペランド無しの OUTPUT ノード（chain だけ）
+    SDValue Out =
+        DAG.getNode(MtGISD::OUTPUT, DL, DAG.getVTList(MVT::Other), {Chain});
+    Chain = Out;
+
+    return Chain;
+  }
+  assert(false);
   SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
   SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
   SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
-  SDValue Chain = CLI.Chain;
   SDValue Callee = CLI.Callee;
   bool &isTailCall = CLI.IsTailCall;
   CallingConv::ID CallConv = CLI.CallConv;
@@ -556,19 +582,22 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     MI.eraseFromParent();
     break;
   }
-  case MtG::MOVEIMM_MACRO:
+  case MtG::MOVEIMM_MACRO: {
     // MOVIMM_MACRO $GR, IMM
     // to
     // NUMBUILD_MACRO IMM
     // MOVE $GR, R0
     BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
         .addImm(MI.getOperand(1).getImm());
-    BuildMI(*MBB, MI, DL, TII.get(MtG::MOVE), MI.getOperand(0).getReg())
-        .addReg(MtG::R0);
+    const auto DstReg = MI.getOperand(0).getReg();
+    if (DstReg != MtG::R0)
+      BuildMI(*MBB, MI, DL, TII.get(MtG::MOVE), MI.getOperand(0).getReg())
+          .addReg(MtG::R0);
 
     MI.eraseFromParent();
 
     break;
+  }
   // case MtG::AND_MACRO: {
 
   //   auto *LoopMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());

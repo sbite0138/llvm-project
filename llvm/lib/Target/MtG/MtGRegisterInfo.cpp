@@ -83,8 +83,9 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     const int64_t totalOffset =
         MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj + Offset;
 
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), DstReg)
-                       .addUse(getFrameRegister(MF)));
+    if (DstReg != getFrameRegister(MF))
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), DstReg)
+                         .addUse(getFrameRegister(MF)));
 
     MBB.insert(
         II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
@@ -108,8 +109,9 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
     // get virtual register for temporary use
     const auto tmpReg = MtG::R7;
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), tmpReg)
-                       .addUse(getFrameRegister(MF)));
+    if (tmpReg != getFrameRegister(MF))
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), tmpReg)
+                         .addUse(getFrameRegister(MF)));
     MBB.insert(
         II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
 
@@ -119,8 +121,8 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
     if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STOREBYTEWISE_MACRO))
-                         .addUse(tmpReg)
-                         .addUse(OpReg));
+                         .addUse(OpReg)
+                         .addUse(tmpReg));
     } else {
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)
                          .addUse(tmpReg));

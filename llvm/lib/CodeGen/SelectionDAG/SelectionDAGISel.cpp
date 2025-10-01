@@ -4321,7 +4321,13 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
 
         assert(ResSlot < RecordedNodes.size() && "Invalid CompleteMatch");
         SDValue Res = RecordedNodes[ResSlot].first;
-
+        NodeToMatch->dump();
+        llvm::dbgs() << "i: " << i << " NodeToMatch->getNumValues(): "
+                     << NodeToMatch->getNumValues()
+                     << "  NodeToMatch->getValueType(i) != MVT::Other : "
+                     << (NodeToMatch->getValueType(i) != MVT::Other)
+                     << "  NodeToMatch->getValueType(i) != MVT::Glue : "
+                     << (NodeToMatch->getValueType(i) != MVT::Glue) << "\n";
         assert(i < NodeToMatch->getNumValues() &&
                NodeToMatch->getValueType(i) != MVT::Other &&
                NodeToMatch->getValueType(i) != MVT::Glue &&

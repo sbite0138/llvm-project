@@ -332,6 +332,6 @@ def : Pat<(MtGISD_OUTPUT), (OUTPUT)>;
 
 
 let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {
-  def RETURN  : Pseudo<(outs), (ins), "Return #0",  []> {
+  def RETURN  : Pseudo<(outs), (ins), "Return",  []> {
   }
 }

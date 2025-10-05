@@ -73,7 +73,8 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                const DebugLoc &DL, MCRegister DestReg,
                                MCRegister SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
-  BuildMI(MBB, I, DL, get(MtG::MOVEREG_MACRO), DestReg)
+  assert(DestReg != SrcReg && "Cannot copy to FLAG register");
+  BuildMI(MBB, I, DL, get(MtG::MOVE), DestReg)
       .addUse(SrcReg, getKillRegState(KillSrc));
 }
 
@@ -90,7 +91,13 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
           .addUse(SrcReg);
   };
-  if (MI.getOpcode() == MtG::ADD_MACRO) {
+  if (MI.getOpcode() == MtG::MOVEREG_MACRO) {
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg = MI.getOperand(1).getReg();
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, DstReg, SrcReg);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::ADD_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();
     std::set<Register> UseRegs = {MtG::R0};

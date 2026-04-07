@@ -82,6 +82,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case thumb:          return "thumb";
   case thumbeb:        return "thumbeb";
   case ve:             return "ve";
+  case mtg:            return "mtg";
   case wasm32:         return "wasm32";
   case wasm64:         return "wasm64";
   case x86:            return "i386";
@@ -251,6 +252,7 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
     return "riscv";
 
   case ve:          return "ve";
+  case mtg:         return "mtg";
   case csky:        return "csky";
 
   case loongarch32:
@@ -469,6 +471,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
       .Case("avr", avr)
       .StartsWith("bpf", BPFArch)
       .Case("m68k", m68k)
+      .Case("mtg", mtg)
       .Case("mips", mips)
       .Case("mipsel", mipsel)
       .Case("mips64", mips64)
@@ -666,6 +669,7 @@ Triple::ArchType Triple::parseArch(StringRef ArchName) {
           .Case("renderscript64", Triple::renderscript64)
           .Case("shave", Triple::shave)
           .Case("ve", Triple::ve)
+          .Case("mtg", Triple::mtg)
           .Case("wasm32", Triple::wasm32)
           .Case("wasm64", Triple::wasm64)
           .Case("csky", Triple::csky)
@@ -1014,6 +1018,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::mips64el:
   case Triple::mips:
   case Triple::msp430:
+  case Triple::mtg:
   case Triple::nvptx64:
   case Triple::nvptx:
   case Triple::ppc64le:
@@ -1738,6 +1743,7 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
 
   case llvm::Triple::avr:
   case llvm::Triple::msp430:
+  case llvm::Triple::mtg:
     return 16;
 
   case llvm::Triple::aarch64_32:
@@ -1845,6 +1851,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::bpfeb:
   case Triple::bpfel:
   case Triple::msp430:
+  case Triple::mtg:
   case Triple::systemz:
   case Triple::ve:
     T.setArch(UnknownArch);
@@ -1932,6 +1939,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::lanai:
   case Triple::m68k:
   case Triple::msp430:
+  case Triple::mtg:
   case Triple::r600:
   case Triple::shave:
   case Triple::sparcel:
@@ -2021,6 +2029,7 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::loongarch32:
   case Triple::loongarch64:
   case Triple::msp430:
+  case Triple::mtg:
   case Triple::nvptx64:
   case Triple::nvptx:
   case Triple::r600:
@@ -2136,6 +2145,7 @@ bool Triple::isLittleEndian() const {
   case Triple::mips64el:
   case Triple::mipsel:
   case Triple::msp430:
+  case Triple::mtg:
   case Triple::nvptx64:
   case Triple::nvptx:
   case Triple::ppcle:
@@ -2391,6 +2401,7 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
   case Triple::lanai:
   case Triple::m68k:
   case Triple::msp430:
+  case Triple::mtg:
   case Triple::systemz:
   case Triple::xcore:
   case Triple::xtensa:

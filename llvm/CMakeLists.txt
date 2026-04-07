@@ -596,6 +596,7 @@ set(LLVM_ALL_EXPERIMENTAL_TARGETS
   CSKY
   DirectX
   M68k
+  MtG
   Xtensa
 )
 

@@ -297,6 +297,10 @@ namespace CallingConv {
     /// stateless compartment.
     CHERIoT_LibraryCall = 127,
 
+    /// Add to pass compile. May be removed later.
+    MtG_BUILTIN = 128,
+    MtG_INTR = 129,
+
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023
   };

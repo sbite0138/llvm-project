@@ -1,0 +1,746 @@
+//===-- MtGISelLowering.cpp - MtG DAG Lowering Implementation  ------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the MtGTargetLowering class.
+//
+//===----------------------------------------------------------------------===//
+
+#include "MtGISelLowering.h"
+#include "MCTargetDesc/MtGMCTargetDesc.h"
+#include "MtG.h"
+#include "MtGMachineFunctionInfo.h"
+#include "MtGRegisterInfo.h"
+#include "MtGSubtarget.h"
+#include "MtGTargetMachine.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/CodeGenTypes/MachineValueType.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <utility>
+using namespace llvm;
+
+#define DEBUG_TYPE "mtg-lower"
+
+static cl::opt<bool> MtGNoLegalImmediate(
+    "mtg-no-legal-immediate", cl::Hidden,
+    cl::desc("Enable non legal immediates (for testing purposes only)"),
+    cl::init(false));
+// MtGTargetLowering.cpp
+MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
+                                     const MtGSubtarget &STI)
+    : TargetLowering(TM) {
+
+  addRegisterClass(MVT::i32, &MtG::GRRegClass);
+
+  // setStackPointerRegisterToSaveRestore(MtG::R8);
+  setOperationAction(ISD::SDIV, MVT::i32, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i32, Expand);
+  setOperationAction(ISD::SELECT, MVT::i32, Legal);
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+  computeRegisterProperties(STI.getRegisterInfo());
+}
+EVT MtGTargetLowering::getSetCCResultType(const DataLayout &DL,
+                                          LLVMContext &Ctx, EVT VT) const {
+  return MVT::i32;
+}
+
+bool MtGTargetLowering::isIntDivCheap(EVT VT, AttributeList Attr) const {
+  return true;
+}
+
+std::pair<unsigned, const TargetRegisterClass *>
+MtGTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                                StringRef Constraint,
+                                                MVT VT) const {
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    default:
+      break;
+    case 'r':
+      return std::make_pair(0U, &MtG::GRRegClass);
+    }
+  }
+
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
+  switch (Op.getOpcode()) {
+  default: {
+    Op.dump();
+    llvm_unreachable("unimplemented operand");
+  }
+  case ISD::GlobalAddress:
+    return LowerGlobalAddress(Op, DAG);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+//                      Calling Convention Implementation
+//===----------------------------------------------------------------------===//
+
+#include "MtGGenCallingConv.inc"
+
+/// For each argument in a function store the number of pieces it is
+/// composed of.
+template <typename ArgT>
+static void ParseFunctionArgs(const SmallVectorImpl<ArgT> &Args,
+                              SmallVectorImpl<unsigned> &Out) {
+  unsigned CurrentArgIndex;
+
+  if (Args.empty())
+    return;
+
+  CurrentArgIndex = Args[0].OrigArgIndex;
+  Out.push_back(0);
+
+  for (auto &Arg : Args) {
+    if (CurrentArgIndex == Arg.OrigArgIndex) {
+      Out.back() += 1;
+    } else {
+      Out.push_back(1);
+      CurrentArgIndex = Arg.OrigArgIndex;
+    }
+  }
+}
+
+static void AnalyzeVarArgs(CCState &State,
+                           const SmallVectorImpl<ISD::OutputArg> &Outs) {
+  State.AnalyzeCallOperands(Outs, CC_MtG);
+}
+
+static void AnalyzeVarArgs(CCState &State,
+                           const SmallVectorImpl<ISD::InputArg> &Ins) {
+  State.AnalyzeFormalArguments(Ins, CC_MtG);
+}
+
+static void AnalyzeRetResult(CCState &State,
+                             const SmallVectorImpl<ISD::InputArg> &Ins) {
+  State.AnalyzeCallResult(Ins, RetCC_MtG);
+}
+
+static void AnalyzeRetResult(CCState &State,
+                             const SmallVectorImpl<ISD::OutputArg> &Outs) {
+  State.AnalyzeReturn(Outs, RetCC_MtG);
+}
+
+template <typename ArgT>
+static void AnalyzeReturnValues(CCState &State,
+                                SmallVectorImpl<CCValAssign> &RVLocs,
+                                const SmallVectorImpl<ArgT> &Args) {
+  AnalyzeRetResult(State, Args);
+}
+
+SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
+                                     SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  SDLoc &dl = CLI.DL;
+  SDValue Chain = CLI.Chain;
+
+  auto isPutchar = [&] {
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(CLI.Callee))
+      if (const Function *F = dyn_cast<Function>(GA->getGlobal()))
+        return F->getName() == "wrap_putchar" && F->arg_size() == 1;
+    if (auto *ES = dyn_cast<ExternalSymbolSDNode>(CLI.Callee))
+      return StringRef(ES->getSymbol()) == "wrap_putchar";
+    return false;
+  }();
+  if (isPutchar) {
+    assert(CLI.OutVals.size() == 1 && "wrap_putchar expects 1 arg");
+    SDValue Arg = CLI.OutVals[0]; // 72
+    SDLoc DL = CLI.DL;
+
+    // まず R8 に値を入れる（必要ならここで即値→レジスタ化）
+    SDValue CT = DAG.getCopyToReg(Chain, DL, MtG::R8, Arg);
+    Chain = CT.getValue(0); // Glue は使わないなら読まない
+
+    // その後、オペランド無しの OUTPUT ノード（chain だけ）
+    SDValue Out =
+        DAG.getNode(MtGISD::OUTPUT, DL, DAG.getVTList(MVT::Other), {Chain});
+    Chain = Out;
+
+    return Chain;
+  }
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
+  SDValue Callee = CLI.Callee;
+  bool &isTailCall = CLI.IsTailCall;
+  CallingConv::ID CallConv = CLI.CallConv;
+  bool isVarArg = CLI.IsVarArg;
+  SmallVector<CCValAssign, 16> RVLocs;
+  SmallVector<CCValAssign, 16> ArgLocs;
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
+                 *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(Outs, CC_MtG);
+  unsigned NumBytes = CCInfo.getStackSize();
+
+  // TODO: Handle byval arguments
+
+  if (!isTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SmallVector<SDValue, 8> MemOpChains;
+  SDValue StackPtr;
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    SDValue ArgValue = OutVals[i];
+    CCValAssign &VA = ArgLocs[i];
+    MVT LocVT = VA.getLocVT();
+
+    if (VA.getLocInfo() != CCValAssign::Full) {
+      llvm_unreachable("Unsupported argument location");
+    }
+    if (VA.isRegLoc()) {
+      RegsToPass.push_back(std::make_pair(VA.getLocReg(), ArgValue));
+      continue;
+    }
+    assert(VA.isMemLoc() && "Unknown argument location");
+
+    if (!StackPtr.getNode()) {
+      StackPtr = DAG.getCopyFromReg(Chain, dl, MtG::R2, PtrVT);
+    }
+    SDValue Address =
+        DAG.getNode(ISD::ADD, dl, PtrVT, StackPtr,
+                    DAG.getIntPtrConstant(VA.getLocMemOffset(), dl));
+
+    // Emit the store.
+    MemOpChains.push_back(
+        DAG.getStore(Chain, dl, ArgValue, Address,
+                     MachinePointerInfo::getStack(MF, VA.getLocMemOffset())));
+  }
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, MemOpChains);
+  SDValue Glue;
+
+  for (auto &Reg : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, dl, Reg.first, Reg.second, Glue);
+    Glue = Chain.getValue(1);
+  }
+
+  if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    const GlobalValue *GV = S->getGlobal();
+    unsigned OpFlags = MtGII::MO_CALL;
+
+    Callee = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0, OpFlags);
+
+  } else {
+    llvm_unreachable("Unsupported callee");
+  }
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  SmallVector<SDValue, 8> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+
+  // Add argument registers to the end of the list so that they are
+  // known live into the call.
+  for (unsigned i = 0, e = RegsToPass.size(); i != e; ++i)
+    Ops.push_back(DAG.getRegister(RegsToPass[i].first,
+                                  RegsToPass[i].second.getValueType()));
+
+  if (Glue.getNode())
+    Ops.push_back(Glue);
+
+  Chain = DAG.getNode(MtGISD::CALL, dl, NodeTys, Ops);
+  Glue = Chain.getValue(1);
+
+  // Create the CALLSEQ_END node.
+  Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, Glue, dl);
+  Glue = Chain.getValue(1);
+
+  // Handle result values, copying them out of physregs into vregs that we
+  // return.
+  return LowerCallResult(Chain, Glue, CallConv, isVarArg, Ins, dl, DAG, InVals);
+}
+/// LowerCallResult - Lower the result values of a call into the
+/// appropriate copies out of appropriate physical registers.
+///
+SDValue MtGTargetLowering::LowerCallResult(
+    SDValue Chain, SDValue InGlue, CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
+
+  // Assign locations to each value returned by this call.
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), RVLocs,
+                 *DAG.getContext());
+
+  AnalyzeReturnValues(CCInfo, RVLocs, Ins);
+
+  // Copy all of the result registers out of their specified physreg.
+  for (unsigned i = 0; i != RVLocs.size(); ++i) {
+    Chain = DAG.getCopyFromReg(Chain, dl, RVLocs[i].getLocReg(),
+                               RVLocs[i].getValVT(), InGlue)
+                .getValue(1);
+    InGlue = Chain.getValue(2);
+    InVals.push_back(Chain.getValue(0));
+  }
+
+  return Chain;
+}
+SDValue
+MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
+                               bool isVarArg,
+                               const SmallVectorImpl<ISD::OutputArg> &Outs,
+                               const SmallVectorImpl<SDValue> &OutVals,
+                               const SDLoc &dl, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  // CCValAssign - represent the assignment of the return value
+  // to a location
+  SmallVector<CCValAssign, 16> RVLocs;
+
+  // CCState - Info about the registers and stack slot.
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), RVLocs,
+                 *DAG.getContext());
+
+  for (unsigned i = 0; i != Outs.size(); ++i) {
+    auto VT = Outs[i].VT;
+    if (VT != MVT::i32) {
+      // print VT type
+      errs() << "VT: " << VT.getScalarType() << '\n';
+    }
+  }
+  CCInfo.AnalyzeReturn(Outs, RetCC_MtG);
+  // SDValue Glue;
+  // SmallVector<SDValue, 4> RetOps(1, Chain);
+  SDValue Flag;
+  SmallVector<SDValue, 4> RetOps(1, Chain);
+
+  // Copy the result values into the output registers.
+  for (unsigned i = 0; i != RVLocs.size(); ++i) {
+    SDValue Val = OutVals[i];
+    CCValAssign &VA = RVLocs[i];
+    assert(VA.isRegLoc() && "Can only return in registers!");
+    assert(RVLocs[i].getValVT() == RVLocs[i].getLocVT() &&
+           "Return value and register value types must match");
+    dbgs() << "[!!!!] MtGTargetLowering::LowerReturn: "
+           << "CallConv: " << CallConv << ", isVarArg: " << isVarArg
+           << ", Chain: " << Chain.getNode() << ", Flag: " << Flag.getNode()
+           << "\n";
+
+    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Val, Flag);
+
+    // Guarantee that all emitted copies are stuck together,
+    // avoiding something bad.
+    Flag = Chain.getValue(1);
+    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+  }
+  dbgs() << "MtGTargetLowering::LowerReturn: "
+         << "CallConv: " << CallConv << ", isVarArg: " << isVarArg
+         << ", Chain: " << Chain.getNode() << ", Flag: " << Flag.getNode()
+         << "\n";
+  RetOps[0] = Chain; // Update chain.
+
+  // Add the glue if we have it.
+  if (Flag.getNode())
+    RetOps.push_back(Flag);
+
+  return DAG.getNode(MtGISD::RET_GLUE, dl, MVT::Other, RetOps);
+}
+
+SDValue MtGTargetLowering::LowerFormalArguments(
+    SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
+
+  assert(isVarArg == false && "VarArg not supported yet");
+
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MtGMachineFunctionInfo *MtGMFI = MF.getInfo<MtGMachineFunctionInfo>();
+
+  MtGMFI->setVarArgsFrameIndex(0);
+
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
+                 *DAG.getContext());
+  CCInfo.AnalyzeFormalArguments(Ins, CC_MtG);
+
+  Function::const_arg_iterator FuncArg =
+      DAG.getMachineFunction().getFunction().arg_begin();
+
+  std::vector<SDValue> OutChains;
+
+  unsigned CurArgIdx = 0;
+  CCInfo.rewindByValRegsInfo();
+
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    CCValAssign &VA = ArgLocs[i];
+    if (Ins[i].isOrigArg()) {
+      std::advance(FuncArg, Ins[i].getOrigArgIndex() - CurArgIdx);
+      CurArgIdx = Ins[i].getOrigArgIndex();
+    }
+    EVT ValVT = VA.getValVT();
+
+    bool IsRegLoc = VA.isRegLoc();
+
+    if (IsRegLoc) {
+      MVT RegVT = VA.getLocVT();
+      unsigned ArgReg = VA.getLocReg();
+      const TargetRegisterClass *RC = getRegClassFor(RegVT);
+
+      unsigned Reg = MF.getRegInfo().createVirtualRegister(RC);
+      MF.getRegInfo().addLiveIn(ArgReg, Reg);
+
+      SDValue ArgValue = DAG.getCopyFromReg(Chain, dl, Reg, RegVT);
+      if (VA.getLocInfo() != CCValAssign::Full) {
+        unsigned Opcode = 0;
+        if (VA.getLocInfo() == CCValAssign::SExt)
+          Opcode = ISD::AssertSext;
+        else if (VA.getLocInfo() == CCValAssign::ZExt)
+          Opcode = ISD::AssertZext;
+        if (Opcode)
+          ArgValue =
+              DAG.getNode(Opcode, dl, RegVT, ArgValue, DAG.getValueType(ValVT));
+        ArgValue = DAG.getNode(ISD::TRUNCATE, dl, ValVT, ArgValue);
+      }
+      InVals.push_back(ArgValue);
+    } else {
+      MVT LocVT = VA.getLocVT();
+      assert(VA.isMemLoc());
+
+      int FI = MFI.CreateFixedObject(ValVT.getSizeInBits() / 8,
+                                     VA.getLocMemOffset(), true);
+      SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+      SDValue Load = DAG.getLoad(
+          LocVT, dl, Chain, FIN,
+          MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI));
+      InVals.push_back(Load);
+      OutChains.push_back(Load.getValue(1));
+    }
+  }
+
+  // if (isVarArg)
+  //   writeVarArgRegs(OutChains, Chain, DL, DAG, CCInfo);
+  // @} MYRISCVXISelLowering_LowerFormalArguments_IsVarArg
+
+  if (!OutChains.empty()) {
+    OutChains.push_back(Chain);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, OutChains);
+  }
+  return Chain;
+}
+
+const char *MtGTargetLowering::getTargetNodeName(unsigned Opcode) const {
+  switch ((MtGISD::NodeType)Opcode) {
+  case MtGISD::FIRST_NUMBER:
+    break;
+  case MtGISD::RET_GLUE:
+    return "MtGISD::RET_GLUE";
+  case MtGISD::RETI_GLUE:
+    return "MtGISD::RETI_GLUE";
+  case MtGISD::RRA:
+    return "MtGISD::RRA";
+  case MtGISD::RLA:
+    return "MtGISD::RLA";
+  case MtGISD::RRC:
+    return "MtGISD::RRC";
+  case MtGISD::RRCL:
+    return "MtGISD::RRCL";
+  case MtGISD::CALL:
+    return "MtGISD::CALL";
+  case MtGISD::Wrapper:
+    return "MtGISD::Wrapper";
+  case MtGISD::BR_CC:
+    return "MtGISD::BR_CC";
+  case MtGISD::CMP:
+    return "MtGISD::CMP";
+  case MtGISD::SETCC:
+    return "MtGISD::SETCC";
+  case MtGISD::SELECT_CC:
+    return "MtGISD::SELECT_CC";
+  case MtGISD::DADD:
+    return "MtGISD::DADD";
+  }
+  return nullptr;
+}
+static MachineBasicBlock *isolateInstrInNewBlock(MachineInstr &MI) {
+  MachineBasicBlock *MBB = MI.getParent();
+  MachineFunction &MF = *MBB->getParent();
+
+  // すでに MI の前に terminator があるか確認
+  bool TerminatorBefore = false;
+  for (auto I = MBB->begin(), E = MachineBasicBlock::iterator(MI); I != E;
+       ++I) {
+    if (I->isTerminator()) {
+      TerminatorBefore = true;
+      break;
+    }
+  }
+  if (!TerminatorBefore)
+    return MBB; // 安全、分割不要
+
+  // 分割：MI 以降を NewMBB へ
+  auto *NewMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+  MF.insert(std::next(MachineFunction::iterator(MBB)), NewMBB);
+
+  // [MI, end) を丸ごと移す（MI を含む！）
+  NewMBB->splice(NewMBB->end(), MBB, MachineBasicBlock::iterator(MI),
+                 MBB->end());
+
+  // 旧後続を NewMBB へ移し、PHI も更新
+  NewMBB->transferSuccessorsAndUpdatePHIs(MBB);
+
+  // ここで MBB 側に追加命令は置かない（先に terminator があるので触らない）
+  // NewMBB 内なら MI の“前”に非終端をいくらでも置ける
+  return NewMBB;
+}
+
+MachineBasicBlock *
+MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                               MachineBasicBlock *BB) const {
+  MachineBasicBlock *MBB = BB; // 引数で渡される BB
+  MachineFunction &MF = *MBB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  auto &MRI = MF.getRegInfo();                           // レジスタ情報
+  const auto *TRI = MF.getSubtarget().getRegisterInfo(); // レジスタ情報
+  DebugLoc DL = MI.getDebugLoc(); // 位置情報（無ければ DebugLoc()）
+
+  llvm::SmallVector<Register, 7> WorkRegs = {
+      MtG::R0, MtG::R1, MtG::R2, MtG::R3, MtG::R4, MtG::R5, MtG::R6, MtG::R7};
+  auto RegIdx = 0;
+  switch (MI.getOpcode()) {
+  case MtG::BRCOND_PSEUDO: {
+    // 1) MI を安全な場所に隔離
+    MachineBasicBlock *Where = isolateInstrInNewBlock(MI);
+    MachineFunction &MF = *Where->getParent();
+    const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+    const DebugLoc DL = MI.getDebugLoc();
+
+    // オペランド: CondReg, TargetMBB
+    Register CondReg = MI.getOperand(0).getReg();
+    MachineBasicBlock *TargetMBB = MI.getOperand(1).getMBB();
+
+    // 2) tail を受ける ExitMBB を用意（Where の直後に挿入）
+    auto *ExitMBB = MF.CreateMachineBasicBlock(Where->getBasicBlock());
+    MF.insert(std::next(MachineFunction::iterator(Where)), ExitMBB);
+
+    // 3) MI の“後ろ”を ExitMBB へ退避（PHI も更新）
+    ExitMBB->splice(ExitMBB->end(), Where,
+                    std::next(MachineBasicBlock::iterator(MI)), Where->end());
+    ExitMBB->transferSuccessorsAndUpdatePHIs(Where);
+
+    // 4) すべて “MI の直前” に挿す（end() は使わない）
+    //    ここは必要なら事前計算を置く（NUMBUILD 等）
+    BuildMI(*Where, MI, DL, TII.get(MtG::FISZERO)).addReg(CondReg);
+    BuildMI(*Where, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    BuildMI(*Where, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+
+    // 条件評価（CondReg が 0 かどうかを見る例）
+
+    // 条件成立で TargetMBB へ分岐（不成立は ExitMBB へフォールスルー）
+    BuildMI(*Where, MI, DL, TII.get(MtG::JUMPFWDNF)).addMBB(TargetMBB);
+
+    // 5) CFG を命令と一致させる（フォールスルー先も successor に含める）
+    Where->addSuccessor(TargetMBB); // 条件が真のとき
+    Where->addSuccessor(ExitMBB);   // 条件が偽のとき（fallthrough）
+
+    // 6) 擬似は消す
+    MI.eraseFromParent();
+
+    // 展開後に継続して挿入するならどちらでもよいが、慣例的に Exit を返しておく
+    return ExitMBB;
+  }
+  case MtG::BR_PSEUDO: {
+    MachineBasicBlock *Where = isolateInstrInNewBlock(MI); // ← 追加
+    MachineFunction &MF = *Where->getParent();
+    const DebugLoc DL = MI.getDebugLoc();
+    auto *ExitMBB = MF.CreateMachineBasicBlock(Where->getBasicBlock());
+    auto *TargetMBB = MI.getOperand(0).getMBB();
+
+    // Where の直後に ExitMBB を配置
+    MF.insert(std::next(MachineFunction::iterator(Where)), ExitMBB);
+
+    // MI の後ろを ExitMBB へ退避（Where 側の末尾を空に）
+    ExitMBB->splice(ExitMBB->end(), Where,
+                    std::next(MachineBasicBlock::iterator(MI)), Where->end());
+    ExitMBB->transferSuccessorsAndUpdatePHIs(Where);
+
+    // すべて “MI の直前” に挿す（Where 内には MI より前に terminator は無い）
+    BuildMI(*Where, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    BuildMI(*Where, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    BuildMI(*Where, MI, DL, TII.get(MtG::JUMPFWD)).addMBB(TargetMBB);
+
+    // CFG 整合
+    Where->addSuccessor(TargetMBB);
+    // ExitMBB は到達しないならこの時点ではエッジ不要（後段で掃除される）
+
+    MI.eraseFromParent();
+    break;
+  }
+  case MtG::MOVEIMM_MACRO: {
+    // MOVIMM_MACRO $GR, IMM
+    // to
+    // NUMBUILD_MACRO IMM
+    // MOVE $GR, R0
+    BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
+        .addImm(MI.getOperand(1).getImm());
+    const auto DstReg = MI.getOperand(0).getReg();
+    if (DstReg != MtG::R0)
+      BuildMI(*MBB, MI, DL, TII.get(MtG::MOVE), MI.getOperand(0).getReg())
+          .addReg(MtG::R0);
+
+    MI.eraseFromParent();
+
+    break;
+  }
+  // case MtG::AND_MACRO: {
+
+  //   auto *LoopMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+  //   auto *ExitMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+
+  //   // 関数に挿入
+  //   MF.insert(std::next(MachineFunction::iterator(MBB)), LoopMBB);
+  //   MF.insert(std::next(MachineFunction::iterator(*LoopMBB)), ExitMBB);
+
+  //   ExitMBB->splice(ExitMBB->begin(), MBB,
+  //                   std::next(MachineBasicBlock::iterator(MI)), MBB->end());
+  //   ExitMBB->transferSuccessors(MBB);
+
+  //   MBB->addSuccessor(LoopMBB);
+  //   LoopMBB->addSuccessor(LoopMBB);
+  //   MBB->addSuccessor(ExitMBB);
+  //   Register Src1_0 = MRI.createVirtualRegister(&MtG::GRRegClass);
+  //   Register Src1_1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+  //   Register Src1_2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+  //   Register Src2_0 = MRI.createVirtualRegister(&MtG::GRRegClass);
+  //   Register Src2_1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+  //   Register Src2_2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+  //   const auto DstReg = MI.getOperand(0).getReg();
+  //   const auto Src1Reg = MI.getOperand(1).getReg();
+  //   const auto Src2Reg = MI.getOperand(2).getReg();
+
+  //   BuildMI(MBB, DL, TII.get(MtG::MOVE), MtG::R3).addUse(Src1Reg);
+  //   BuildMI(MBB, DL, TII.get(MtG::ZERO), MtG::R4);
+
+  //   BuildMI(MBB, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(1ULL << 31);
+  //   BuildMI(MBB, DL, TII.get(MtG::MOVE), MtG::R7).addUse(MtG::R0);
+  //   BuildMI(MBB, DL, TII.get(MtG::MOVE), Src1_0).addUse(MtG::R3);
+  //   BuildMI(MBB, DL, TII.get(MtG::MOVE), Src2_0).addUse(Src2Reg);
+
+  //   BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI),
+  //   Src1_1)
+  //       .addReg(Src1_0)
+  //       .addMBB(MBB)
+  //       .addReg(Src1_2)
+  //       .addMBB(LoopMBB);
+  //   BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI),
+  //   Src2_1)
+  //       .addReg(Src2_0)
+  //       .addMBB(MBB)
+  //       .addReg(Src2_2)
+  //       .addMBB(LoopMBB);
+
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), Src1_2)
+  //       .addUse(Src1_1)
+  //       .addUse(MtG::R7);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), MtG::R5);
+
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), Src2_2)
+  //       .addUse(Src2_1)
+  //       .addUse(MtG::R7);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), MtG::R6);
+
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::MULT), MtG::R5)
+  //       .addUse(MtG::R5)
+  //       .addUse(MtG::R6);
+
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::FISZERO)).addUse(MtG::R5);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), MtG::R5);
+
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::ADD), MtG::R4)
+  //       .addUse(MtG::R4)
+  //       .addUse(MtG::R4);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::ADD), MtG::R4)
+  //       .addUse(MtG::R4)
+  //       .addUse(MtG::R5);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), MtG::R7).addUse(MtG::R7);
+  //   BuildMI(MBB, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+  //   BuildMI(MBB, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+  //   BuildMI(MBB, DL, TII.get(MtG::FISZERO)).addUse(MtG::R7);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::JUMPBWDNF)).addMBB(LoopMBB);
+
+  //   BuildMI(MBB, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+  //   BuildMI(MBB, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+  //   BuildMI(LoopMBB, DL, TII.get(MtG::JUMPFWD)).addMBB(ExitMBB);
+
+  //   Register Src2_3 = MRI.createVirtualRegister(&MtG::GRRegClass);
+  //   Register Dst_0 = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+  //   auto IP = ExitMBB->getFirstNonPHI();
+  //   BuildMI(*ExitMBB, IP, DL, TII.get(MtG::MOVE), DstReg)
+  //       .addUse(MtG::R4, RegState::Kill);
+  //   MI.eraseFromParent();
+  //   return ExitMBB;
+  // }
+  default:
+    break;
+  }
+  return BB;
+}
+
+SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  llvm::dbgs() << "LowerGlobalAddress\n";
+  const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
+
+  int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
+  assert(Offset == 0 && "Offset must be zero for MtG");
+
+  SDValue Addr = DAG.getTargetGlobalAddress(GV, SDLoc(Op), MVT::iPTR, 0);
+
+  // Create the TargetGlobalAddress node, folding in the constant offset.
+  // SDValue Result = DAG.getTargetGlobalAddress(GV, SDLoc(Op), PtrVT,
+  // Offset);
+  return DAG.getNode(MtGISD::WRAP_ADDR, SDLoc(Op), MVT::iPTR, Addr, Addr);
+}
+
+bool MtGTargetLowering::isLegalAddressingMode(const DataLayout &DL,
+                                              const AddrMode &AM, Type *Ty,
+                                              unsigned AS,
+                                              Instruction *CtxI) const {
+  if (AS != 0)
+    return false;
+  if (!AM.HasBaseReg)
+    return false;
+  if (AM.BaseOffs != 0)
+    return false;
+  if (AM.BaseGV != nullptr)
+    return false;
+  if (AM.Scale != 0)
+    return false;
+  if (AM.ScalableOffset != 0)
+    return false;
+  return true;
+}

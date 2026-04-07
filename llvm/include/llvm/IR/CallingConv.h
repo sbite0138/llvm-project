@@ -284,6 +284,10 @@ namespace CallingConv {
     RISCV_VLSCall_32768 = 122,
     RISCV_VLSCall_65536 = 123,
 
+    /// Add to pass compile. May be removed later.
+    MtG_BUILTIN = 124,
+    MtG_INTR = 125,
+
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023
   };

@@ -94,15 +94,19 @@ def NOP : CCCForm<0b000000000000,
                     }
 
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1, usesCustomInserter = 1, Defs = [R0]  in 
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0]  in
 def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
                     "BR_PSEUDO $imm",[(br bb:$imm)]>;
 
-  
+// $polarity: 0 = branch if $cond != 0, 1 = branch if $cond == 0.
+// Expanded in expandPostRAPseudo to FISZERO + NUMBUILD placeholders +
+// JUMPFWDNF/JUMPFWDF/JUMPBWDNF/JUMPBWDF depending on polarity and direction.
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0, FLAG]  in
+def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, i32imm:$polarity, brtarget:$imm),
+                    "BRCOND_PSEUDO $cond, $polarity, $imm",[]>;
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1, usesCustomInserter = 1, Defs = [R0, FLAG]  in 
-def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, brtarget:$imm),
-                    "BRCOND_PSEUDO $cond, $imm",[(brcond GR:$cond, bb:$imm)]>;
+def : Pat<(brcond GR:$cond, bb:$imm),
+          (BRCOND_PSEUDO GR:$cond, 0, bb:$imm)>;
 
 let isCall = 1, Defs = [R0], isCodeGenOnly = 0 in {
   def CALL_PSEUDO : Pseudo<(outs), (ins calltarget:$src),
@@ -287,18 +291,36 @@ def HALVE : CCRForm<0b01000010, (outs GR:$dst), (ins GR:$src1),
 let isBarrier = 1, isBranch = 1, isTerminator = 1 in
 def JUMPFWD : CCCForm<0b001100000000, (outs), (ins  brtarget:$brt),
                     "JumpFwd\t $brt",[]>{
-                    let Uses = [R0];    
+                    let Uses = [R0];
+}
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1 in
+def JUMPBWD : CCRForm<0b00110001, (outs), (ins  brtarget:$brt),
+                    "JumpBwd\t $brt",[]>{
+                    let Uses = [R0];
 }
 
 let isBarrier = 1, isBranch = 1, isTerminator = 1 in
 def JUMPFWDNF : CCCForm<0b001100000000, (outs), (ins  brtarget:$brt),
                     "JumpFwdNF\t $brt",[]>{
-                    let Uses = [R0, FLAG];    
+                    let Uses = [R0, FLAG];
 }
 
 let isBarrier = 1, isBranch = 1, isTerminator = 1 in
 def JUMPBWDNF : CCRForm<0b00110011, (outs), (ins  brtarget:$brt),
                     "JumpBwdNF\t $brt",[]>{
+                    let Uses = [R0, FLAG];
+}
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1 in
+def JUMPFWDF : CCRForm<0b00110100, (outs), (ins  brtarget:$brt),
+                    "JumpFwdF\t $brt",[]>{
+                    let Uses = [R0, FLAG];
+}
+
+let isBarrier = 1, isBranch = 1, isTerminator = 1 in
+def JUMPBWDF : CCRForm<0b00110101, (outs), (ins  brtarget:$brt),
+                    "JumpBwdF\t $brt",[]>{
                     let Uses = [R0, FLAG];
 }
 

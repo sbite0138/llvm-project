@@ -15,6 +15,7 @@ add_public_tablegen_target(MtGCommonTableGen)
 
 add_llvm_target(MtGCodeGen
   MtGBranchSelector.cpp
+  MtGExpandBranchPseudo.cpp
   MtGISelDAGToDAG.cpp
   MtGISelLowering.cpp
   MtGInstrInfo.cpp

@@ -43,6 +43,8 @@ FunctionPass *createMtGISelDag(MtGTargetMachine &TM,
 
 FunctionPass *createMtGBranchSelectionPass();
 
+FunctionPass *createMtGExpandBranchPseudoPass();
+
 void initializeMtGDAGToDAGISelLegacyPass(PassRegistry &);
 
 } // namespace llvm

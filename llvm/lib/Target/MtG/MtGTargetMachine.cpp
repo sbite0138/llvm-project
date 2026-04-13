@@ -95,7 +95,7 @@ bool MtGPassConfig::addInstSelector() {
 }
 
 void MtGPassConfig::addPreEmitPass() {
-  // Must run branch selection immediately preceding the asm printer.
-  // addPass(createMtGBranchSelectionPass());
-  // addPass(createExpandPostRAPseudoPass());
+  // Expand BR_PSEUDO / BRCOND_PSEUDO after block placement so we pick
+  // forward/backward Jump opcodes based on the final layout.
+  addPass(createMtGExpandBranchPseudoPass());
 }

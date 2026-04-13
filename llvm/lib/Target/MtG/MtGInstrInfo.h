@@ -54,21 +54,21 @@ public:
   bool expandPostRAPseudo(MachineInstr &MI) const override;
   // unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
 
-  // Branch folding goodness
-  // bool
-  // reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
-  // override; bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock
-  // *&TBB,
-  //                    MachineBasicBlock *&FBB,
-  //                    SmallVectorImpl<MachineOperand> &Cond,
-  //                    bool AllowModify) const override;
+  bool reverseBranchCondition(
+      SmallVectorImpl<MachineOperand> &Cond) const override;
 
-  // unsigned removeBranch(MachineBasicBlock &MBB,
-  //                       int *BytesRemoved = nullptr) const override;
-  // unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-  //                       MachineBasicBlock *FBB, ArrayRef<MachineOperand>
-  //                       Cond, const DebugLoc &DL, int *BytesAdded = nullptr)
-  //                       const override;
+  bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                     MachineBasicBlock *&FBB,
+                     SmallVectorImpl<MachineOperand> &Cond,
+                     bool AllowModify) const override;
+
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
+
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                        MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
+                        const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
 
   void adjustStackPtr(unsigned SP, int64_t Amount, MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator I) const;

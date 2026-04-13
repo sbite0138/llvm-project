@@ -429,6 +429,132 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   return false;
 }
 
+bool MtGInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
+                                 MachineBasicBlock *&TBB,
+                                 MachineBasicBlock *&FBB,
+                                 SmallVectorImpl<MachineOperand> &Cond,
+                                 bool AllowModify) const {
+  MachineBasicBlock::iterator I = MBB.end();
+  while (I != MBB.begin()) {
+    --I;
+    if (I->isDebugInstr())
+      continue;
+
+    // Stop at the first non-terminator instruction.
+    if (!isUnpredicatedTerminator(*I))
+      break;
+
+    // A terminator that isn't a branch can't easily be handled.
+    if (!I->isBranch())
+      return true;
+
+    unsigned Opc = I->getOpcode();
+
+    // Handle unconditional branch.
+    if (Opc == MtG::BR_PSEUDO) {
+      if (!AllowModify) {
+        TBB = I->getOperand(0).getMBB();
+        continue;
+      }
+
+      // Delete anything after an unconditional branch.
+      MBB.erase(std::next(I), MBB.end());
+      Cond.clear();
+      FBB = nullptr;
+
+      // Delete a branch that is a fall-through.
+      if (MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
+        TBB = nullptr;
+        I->eraseFromParent();
+        I = MBB.end();
+        continue;
+      }
+
+      TBB = I->getOperand(0).getMBB();
+      continue;
+    }
+
+    // Handle conditional branch.
+    if (Opc == MtG::BRCOND_PSEUDO) {
+      // Only handle the case where this is the first (and only) conditional
+      // branch seen so far.
+      if (!Cond.empty())
+        return true;
+
+      FBB = TBB;
+      TBB = I->getOperand(2).getMBB();
+      Cond.push_back(I->getOperand(0)); // Cond register
+      Cond.push_back(I->getOperand(1)); // Polarity immediate
+      continue;
+    }
+
+    // Unknown branch type.
+    return true;
+  }
+
+  return false;
+}
+
+unsigned MtGInstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                    int *BytesRemoved) const {
+  assert(!BytesRemoved && "code size not handled");
+
+  MachineBasicBlock::iterator I = MBB.end();
+  unsigned Count = 0;
+
+  while (I != MBB.begin()) {
+    --I;
+    if (I->isDebugInstr())
+      continue;
+    if (I->getOpcode() != MtG::BR_PSEUDO &&
+        I->getOpcode() != MtG::BRCOND_PSEUDO)
+      break;
+    I->eraseFromParent();
+    I = MBB.end();
+    ++Count;
+  }
+
+  return Count;
+}
+
+unsigned MtGInstrInfo::insertBranch(MachineBasicBlock &MBB,
+                                    MachineBasicBlock *TBB,
+                                    MachineBasicBlock *FBB,
+                                    ArrayRef<MachineOperand> Cond,
+                                    const DebugLoc &DL,
+                                    int *BytesAdded) const {
+  assert(TBB && "insertBranch must not be told to insert a fallthrough");
+  assert((Cond.size() == 0 || Cond.size() == 2) &&
+         "MtG branch conditions have 0 or 2 components!");
+  assert(!BytesAdded && "code size not handled");
+
+  if (Cond.empty()) {
+    assert(!FBB && "Unconditional branch with multiple successors!");
+    BuildMI(&MBB, DL, get(MtG::BR_PSEUDO)).addMBB(TBB);
+    return 1;
+  }
+
+  unsigned Count = 0;
+  BuildMI(&MBB, DL, get(MtG::BRCOND_PSEUDO))
+      .addReg(Cond[0].getReg())
+      .addImm(Cond[1].getImm())
+      .addMBB(TBB);
+  ++Count;
+
+  if (FBB) {
+    BuildMI(&MBB, DL, get(MtG::BR_PSEUDO)).addMBB(FBB);
+    ++Count;
+  }
+  return Count;
+}
+
+bool MtGInstrInfo::reverseBranchCondition(
+    SmallVectorImpl<MachineOperand> &Cond) const {
+  assert(Cond.size() == 2 && "Invalid branch condition!");
+  Cond[1].setImm(Cond[1].getImm() ^ 1);
+  return false;
+}
+
 bool MtGInstrInfo::isRegisterLiveAfter(const MachineInstr &MI,
                                        Register Reg) const {
   const MachineBasicBlock *MBB = MI.getParent();

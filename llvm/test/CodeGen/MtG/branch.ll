@@ -1,11 +1,15 @@
 ; RUN: llc -mtriple=mtg < %s 2>/dev/null | FileCheck %s
 
 ; Basic if-then-else.  Should lower to FIsZero + a forward conditional jump
-; plus an unconditional forward jump.
+; plus an unconditional forward jump.  The two NumBuild placeholders preceding
+; each Jump must be patched with a non-zero base-144 displacement (at least
+; one of them must be non-zero for a real forward jump).
 define i32 @if_then_else(i32 %a) nounwind {
 ; CHECK-LABEL: if_then_else:
 ; CHECK: FIsZero
-; CHECK: JumpFwd
+; CHECK: NumBuild
+; CHECK-NEXT: NumBuild	 #0, #{{[1-9][0-9]*|[1-9]}}
+; CHECK-NEXT: JumpFwd
 ; CHECK: Return
 entry:
   %cmp = icmp eq i32 %a, 0
@@ -17,11 +21,14 @@ else:
 }
 
 ; Simple counted loop. Requires a backward conditional branch for the loop
-; back-edge.
+; back-edge. The NumBuilds immediately before JumpBwd must encode a non-zero
+; displacement.
 define i32 @counted_loop(i32 %n) nounwind {
 ; CHECK-LABEL: counted_loop:
 ; CHECK: FIsZero
-; CHECK: JumpBwd
+; CHECK: NumBuild
+; CHECK-NEXT: NumBuild	 #{{[1-9][0-9]*|[1-9]}},
+; CHECK-NEXT: JumpBwd
 ; CHECK: Return
 entry:
   br label %loop

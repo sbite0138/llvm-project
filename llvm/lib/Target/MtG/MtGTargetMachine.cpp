@@ -98,4 +98,7 @@ void MtGPassConfig::addPreEmitPass() {
   // Expand BR_PSEUDO / BRCOND_PSEUDO after block placement so we pick
   // forward/backward Jump opcodes based on the final layout.
   addPass(createMtGExpandBranchPseudoPass());
+  // Patch the NumBuild placeholders preceding each Jump with the real
+  // PC-relative displacement. Must run last so instruction counts are final.
+  addPass(createMtGBranchSelectionPass());
 }

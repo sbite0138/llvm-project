@@ -1,4 +1,4 @@
-//===-- MtGBranchSelector.cpp - Emit long conditional branches ---------===//
+//===-- MtGBranchSelector.cpp - Patch Jump displacement NumBuilds ---------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,46 +6,41 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains a pass that scans a machine function to determine which
-// conditional branches need more than 10 bits of displacement to reach their
-// target basic block.  It does this in two passes; a calculation of basic block
-// positions pass, and a branch pseudo op to machine branch opcode pass.  This
-// pass should be run last, just before the assembly printer.
+// Every MtG Jump* instruction is emitted by MtGExpandBranchPseudo (and by
+// the ret-sequence expander) as:
+//
+//   NumBuild 0, 0   ; high base-144 digit of Z (placeholder)
+//   NumBuild 0, 0   ; low  base-144 digit of Z (placeholder)
+//   Jump{Fwd,Bwd}{,F,NF} target
+//
+// MtG hardware evaluates branches as PC += 3*r0 (forward) or PC -= 3*r0
+// (backward), where r0 has been built up by the two preceding NumBuilds:
+//   r0 = (12*Y1 + Z1) * 144 + (12*Y2 + Z2)
+//
+// This pass runs last (right before the asm printer), assigns each real
+// instruction a linear position, computes the displacement Z from each
+// Jump to its target in instruction units, and patches the two placeholder
+// NumBuild immediates with the corresponding base-144 digits.
 //
 //===----------------------------------------------------------------------===//
 
 #include "MtG.h"
 #include "MtGInstrInfo.h"
 #include "MtGSubtarget.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "mtg-branch-select"
 
-static cl::opt<bool>
-    BranchSelectEnabled("mtg-branch-select", cl::Hidden, cl::init(true),
-                        cl::desc("Expand out of range branches"));
-
-STATISTIC(NumSplit, "Number of machine basic blocks split");
-STATISTIC(NumExpanded, "Number of branches expanded to long format");
+STATISTIC(NumPatched, "Number of branches patched with PC-relative offsets");
 
 namespace {
 class MtGBSel : public MachineFunctionPass {
-
-  typedef SmallVector<int, 16> OffsetVector;
-
-  MachineFunction *MF;
-  const MtGInstrInfo *TII;
-
-  unsigned measureFunction(OffsetVector &BlockOffsets,
-                           MachineBasicBlock *FromBB = nullptr);
-  bool expandBranches(OffsetVector &BlockOffsets);
-
 public:
   static char ID;
   MtGBSel() : MachineFunctionPass(ID) {}
@@ -62,57 +57,125 @@ public:
 char MtGBSel::ID = 0;
 } // namespace
 
-static bool isInRage(int DistanceInBytes) {
-  // According to CC430 Family User's Guide, Section 4.5.1.3, branch
-  // instructions have the signed 10-bit word offset field, so first we need to
-  // convert the distance from bytes to words, then check if it fits in 10-bit
-  // signed integer.
-  const int WordSize = 2;
-
-  assert((DistanceInBytes % WordSize == 0) &&
-         "Branch offset should be word aligned!");
-
-  int Words = DistanceInBytes / WordSize;
-  return isInt<10>(Words);
+// Return true if MI occupies a slot in the emitted instruction stream.
+// Meta instructions (DBG_VALUE, CFI, labels, KILL, IMPLICIT_DEF, etc.) do not.
+static bool isCountedInstruction(const MachineInstr &MI) {
+  return !MI.isMetaInstruction();
 }
 
-/// Measure each basic block, fill the BlockOffsets, and return the size of
-/// the function, starting with BB
-unsigned MtGBSel::measureFunction(OffsetVector &BlockOffsets,
-                                  MachineBasicBlock *FromBB) {
-  // Give the blocks of the function a dense, in-order, numbering.
-  MF->RenumberBlocks(FromBB);
-
-  MachineFunction::iterator Begin;
-  if (FromBB == nullptr) {
-    Begin = MF->begin();
-  } else {
-    Begin = FromBB->getIterator();
+// Classify a Jump* opcode. Returns false if MI is not a jump we patch.
+static bool isJump(unsigned Opc, bool &IsForward) {
+  switch (Opc) {
+  case MtG::JUMPFWD:
+  case MtG::JUMPFWDNF:
+  case MtG::JUMPFWDF:
+    IsForward = true;
+    return true;
+  case MtG::JUMPBWD:
+  case MtG::JUMPBWDNF:
+  case MtG::JUMPBWDF:
+    IsForward = false;
+    return true;
+  default:
+    return false;
   }
+}
 
-  BlockOffsets.resize(MF->getNumBlockIDs());
-
-  unsigned TotalSize = BlockOffsets[Begin->getNumber()];
-  for (auto &MBB : make_range(Begin, MF->end())) {
-    BlockOffsets[MBB.getNumber()] = TotalSize;
-    for (MachineInstr &MI : MBB) {
-      TotalSize += TII->getInstSizeInBytes(MI);
+bool MtGBSel::runOnMachineFunction(MachineFunction &MF) {
+  // Assign each counted instruction a linear position, and record each
+  // block's starting position.
+  DenseMap<const MachineInstr *, unsigned> InstrPos;
+  DenseMap<const MachineBasicBlock *, unsigned> BlockStartPos;
+  unsigned Pos = 0;
+  for (const MachineBasicBlock &MBB : MF) {
+    BlockStartPos[&MBB] = Pos;
+    for (const MachineInstr &MI : MBB) {
+      if (!isCountedInstruction(MI))
+        continue;
+      InstrPos[&MI] = Pos;
+      ++Pos;
     }
   }
-  return TotalSize;
+
+  bool Changed = false;
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      bool IsForward;
+      if (!isJump(MI.getOpcode(), IsForward))
+        continue;
+
+      assert(MI.getNumOperands() >= 1 && MI.getOperand(0).isMBB() &&
+             "Jump operand must be an MBB");
+      const MachineBasicBlock *Target = MI.getOperand(0).getMBB();
+
+      unsigned JumpPos = InstrPos.lookup(&MI);
+      unsigned TargetPos = BlockStartPos.lookup(Target);
+
+      // PC after the jump instruction points at JumpPos + 1.
+      //   Forward:  PC + 3Z = TargetPos  →  Z = TargetPos - (JumpPos + 1)
+      //   Backward: PC - 3Z = TargetPos  →  Z = (JumpPos + 1) - TargetPos
+      int64_t Z;
+      if (IsForward)
+        Z = (int64_t)TargetPos - (int64_t)(JumpPos + 1);
+      else
+        Z = (int64_t)(JumpPos + 1) - (int64_t)TargetPos;
+
+      if (Z < 0) {
+        // MtGExpandBranchPseudo picks direction from layout, so a negative
+        // displacement here is a bug somewhere upstream.
+        errs() << "MtGBranchSelector: negative displacement " << Z
+               << " for jump: " << MI;
+        continue;
+      }
+
+      if (Z >= 144 * 144) {
+        // Exceeded the 2-digit NumBuild encoding range. Supporting longer
+        // displacements would require emitting more NumBuild digits, which
+        // in turn changes instruction counts and needs iteration to converge.
+        // Out of scope for now.
+        report_fatal_error("MtG branch displacement exceeds 2-digit NumBuild "
+                           "encoding; wider offsets are not yet supported");
+      }
+
+      unsigned HighDigit = Z / 144;
+      unsigned LowDigit = Z % 144;
+
+      // Locate the two NumBuild placeholders immediately preceding the jump.
+      // MtGExpandBranchPseudo and the RET_PSEUDO expander always emit them
+      // directly before the Jump, so stepping back two non-meta instructions
+      // is sufficient.
+      auto StepBackToCounted = [](MachineBasicBlock::iterator It,
+                                  MachineBasicBlock::iterator Begin)
+          -> MachineBasicBlock::iterator {
+        while (It != Begin) {
+          --It;
+          if (isCountedInstruction(*It))
+            return It;
+        }
+        return Begin;
+      };
+
+      auto MBBBegin = MBB.begin();
+      auto It = MI.getIterator();
+      if (It == MBBBegin)
+        continue;
+      auto NB2It = StepBackToCounted(It, MBBBegin);
+      if (NB2It == MBBBegin || NB2It->getOpcode() != MtG::NUMBUILD)
+        continue;
+      auto NB1It = StepBackToCounted(NB2It, MBBBegin);
+      if (NB1It == NB2It || NB1It->getOpcode() != MtG::NUMBUILD)
+        continue;
+
+      NB1It->getOperand(0).setImm(HighDigit / 12);
+      NB1It->getOperand(1).setImm(HighDigit % 12);
+      NB2It->getOperand(0).setImm(LowDigit / 12);
+      NB2It->getOperand(1).setImm(LowDigit % 12);
+
+      ++NumPatched;
+      Changed = true;
+    }
+  }
+  return Changed;
 }
 
-/// Do expand branches and split the basic blocks if necessary.
-/// Returns true if made any change.
-bool MtGBSel::expandBranches(OffsetVector &BlockOffsets) {
-  // TODO: Implement branch expansion when needed
-  return false;
-}
-
-bool MtGBSel::runOnMachineFunction(MachineFunction &mf) {
-  // TODO: Implement branch selection when needed
-  return false;
-}
-
-/// Returns an instance of the Branch Selection Pass
 FunctionPass *llvm::createMtGBranchSelectionPass() { return new MtGBSel(); }

@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -49,15 +50,20 @@ MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 
 BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
+  // FLAG: condition-flag register (read by SetF/SetNF and all branches).
+  // R0: universal scratch — NumBuild's implicit destination and the operand
+  //     to Mult/Divide in every macro that materializes a constant.
+  // R1: frame register (FP).
+  // R2: stack pointer (SP).
+  // R6: Divide's quotient destination. Keeping it reserved means it never
+  //     holds a user virtual register, so byte-wise Load/Store expansions
+  //     may use it as a scratch between Divides (when it happens to be
+  //     free from the hardware's POV).
   Reserved.set(MtG::FLAG);
   Reserved.set(MtG::R0);
   Reserved.set(MtG::R1);
   Reserved.set(MtG::R2);
-  Reserved.set(MtG::R3);
-  Reserved.set(MtG::R4);
-  Reserved.set(MtG::R5);
   Reserved.set(MtG::R6);
-  Reserved.set(MtG::R7);
 
   return Reserved;
 }
@@ -105,27 +111,38 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     const int64_t totalOffset =
         MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj;
 
-    const auto MRI = &MF.getRegInfo();
+    // Pick a scratch for the FP + offset computation. The byte-wise FI
+    // pseudo declares Defs = [R0..R7], so regalloc is guaranteed no user
+    // vreg is live across it in R3-R5 / R7; we only need to avoid OpReg
+    // itself (which is the value being spilled / the destination of the
+    // load — its live value is still needed here).
+    Register TmpReg;
+    for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+      if (R != OpReg) {
+        TmpReg = R;
+        break;
+      }
+    }
+    assert(TmpReg.isValid() &&
+           "Could not find scratch for FI address computation");
 
-    // get virtual register for temporary use
-    const auto tmpReg = MtG::R7;
-    if (tmpReg != getFrameRegister(MF))
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), tmpReg)
+    if (TmpReg != getFrameRegister(MF))
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), TmpReg)
                          .addUse(getFrameRegister(MF)));
     MBB.insert(
         II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
 
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), tmpReg)
-                       .addReg(tmpReg)
+    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), TmpReg)
+                       .addReg(TmpReg)
                        .addReg(MtG::R0));
 
     if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STOREBYTEWISE_MACRO))
                          .addUse(OpReg)
-                         .addUse(tmpReg));
+                         .addUse(TmpReg));
     } else {
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)
-                         .addUse(tmpReg));
+                         .addUse(TmpReg));
     }
     MI.eraseFromParent();
 

@@ -376,119 +376,109 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO) {
+    // Split a 32-bit value byte-wise into 4 consecutive memory cells starting
+    // at $addr. $val is copied into ByteWorkReg and progressively divided by
+    // 256; the low byte (remainder) is stored each iteration and the upper
+    // part (quotient) is fetched back from R6. The address lives in a
+    // separate IterAddrReg so we don't corrupt the caller's $addr.
+    //
+    // Both scratches are picked dynamically from {R3, R4, R5, R7}: the
+    // pseudo declares Defs=[R0..R7] so regalloc guarantees no user vreg is
+    // live across this macro in those registers, but $val or $addr might
+    // themselves be allocated to one of them — we just avoid clashes.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
-    // print register in string format
-    std::set<Register> UseRegs = {MtG::R0, MtG::R3, MtG::R4, MtG::R5, MtG::R6};
+    assert(ValReg != AddrReg && "STOREBYTEWISE expects distinct val and addr");
 
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R5, AddrReg);
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R3, AddrReg);
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R4, ValReg);
+    Register IterAddrReg, ByteWorkReg;
+    for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+      if (R == ValReg || R == AddrReg)
+        continue;
+      if (!IterAddrReg.isValid())
+        IterAddrReg = R;
+      else {
+        ByteWorkReg = R;
+        break;
+      }
+    }
+    assert(IterAddrReg.isValid() && ByteWorkReg.isValid() &&
+           "Could not find scratches for STOREBYTEWISE_MACRO");
+
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, ValReg);
 
     auto NumBuildMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(256);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
-        .addUse(MtG::R4);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
-        .addUse(MtG::R3)
-        .addUse(MtG::R4);
+    for (int i = 0; i < 4; ++i) {
+      // ByteWorkReg = ByteWorkReg % 256 (low byte); R6 = upper bytes.
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), ByteWorkReg)
+          .addUse(ByteWorkReg);
+      // *iter = low byte
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+          .addUse(IterAddrReg)
+          .addUse(ByteWorkReg);
+      if (i < 3) {
+        // Refill ByteWorkReg with the higher bytes and advance the iterator.
+        BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, MtG::R6);
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), IterAddrReg)
+            .addUse(IterAddrReg);
+      }
+    }
 
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R4, MtG::R6);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
-        .addUse(MtG::R3);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
-        .addUse(MtG::R4);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
-        .addUse(MtG::R3)
-        .addUse(MtG::R4);
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R4, MtG::R6);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
-        .addUse(MtG::R3);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
-        .addUse(MtG::R4);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
-        .addUse(MtG::R3)
-        .addUse(MtG::R4);
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R4, MtG::R6);
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), MtG::R3)
-        .addUse(MtG::R3);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), MtG::R4)
-        .addUse(MtG::R4);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
-        .addUse(MtG::R3)
-        .addUse(MtG::R4);
-    assert((UseRegs.count(AddrReg) == 0 || !isRegisterLiveAfter(MI, AddrReg)) &&
-           "Invalid AddrReg");
-    assert((UseRegs.count(ValReg) == 0 || !isRegisterLiveAfter(MI, ValReg)) &&
-           "Invalid ValReg");
     expandPostRAPseudo(*NumBuildMI);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
+    // Reconstruct a 32-bit value from 4 consecutive memory cells starting at
+    // $addr. The high byte is loaded first and the accumulator is shifted up
+    // by 256 (via MULT) before adding each lower byte. Only one dynamic
+    // scratch is needed (the iterating address register) — we reuse R6 as
+    // the per-iteration byte temp because it isn't touched between the LOAD
+    // / ADD / MULT / SUB1COND operations of the loop.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
-    llvm::dbgs() << "Expanding LOADBYTEWISE_MACRO\n";
-    llvm::dbgs() << "AddrReg" << TRI->getName(AddrReg) << "\n";
-    llvm::dbgs() << "ValReg" << TRI->getName(ValReg) << "\n";
 
-    std::vector<Register> WorkRegs = {MtG::R3, MtG::R4, MtG::R5, MtG::R6};
-    erase(WorkRegs, AddrReg);
-    erase(WorkRegs, ValReg);
-    const auto AddrWorkReg = WorkRegs.at(0);
-    const auto ValWorkReg = WorkRegs.at(1);
+    Register IterAddrReg;
+    for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+      if (R != ValReg && R != AddrReg) {
+        IterAddrReg = R;
+        break;
+      }
+    }
+    assert(IterAddrReg.isValid() &&
+           "Could not find scratch for LOADBYTEWISE_MACRO");
+
     std::vector<MachineInstr *> NumBuildMIs;
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, AddrWorkReg, AddrReg);
+
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(3));
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), AddrWorkReg)
-        .addUse(AddrWorkReg)
+    // IterAddrReg now points at the high byte (addr + 3).
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), IterAddrReg)
+        .addUse(IterAddrReg)
         .addUse(MtG::R0);
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(256));
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
-        .addUse(AddrWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
-        .addUse(ValReg)
-        .addUse(ValWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
-        .addUse(ValReg)
-        .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrWorkReg)
-        .addUse(AddrWorkReg);
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
-        .addUse(AddrWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
-        .addUse(ValReg)
-        .addUse(ValWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
-        .addUse(ValReg)
-        .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrWorkReg)
-        .addUse(AddrWorkReg);
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
-        .addUse(AddrWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
-        .addUse(ValReg)
-        .addUse(ValWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
-        .addUse(ValReg)
-        .addUse(MtG::R0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), AddrWorkReg)
-        .addUse(AddrWorkReg);
-
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValWorkReg)
-        .addUse(AddrWorkReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
-        .addUse(ValReg)
-        .addUse(ValWorkReg);
+    for (int i = 0; i < 4; ++i) {
+      // Byte temp lives in R6 — no Divide in this loop so it's stable.
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R6)
+          .addUse(IterAddrReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+          .addUse(ValReg)
+          .addUse(MtG::R6);
+      if (i < 3) {
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+            .addUse(ValReg)
+            .addUse(MtG::R0);
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), IterAddrReg)
+            .addUse(IterAddrReg);
+      }
+    }
 
     for (auto *NumBuildMI : NumBuildMIs)
       expandPostRAPseudo(*NumBuildMI);

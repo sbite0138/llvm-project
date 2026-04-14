@@ -31,6 +31,22 @@ public:
                            unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
 
+  // We eliminate byte-wise FI pseudos post-regalloc and need a scratch
+  // register to hold the computed FP + offset address (MtG has no
+  // base+offset store). Request a RegScavenger so the generic code runs it
+  // with an emergency spill slot reserved.
+  bool requiresRegisterScavenging(const MachineFunction &MF) const override {
+    return true;
+  }
+
+  bool requiresFrameIndexScavenging(const MachineFunction &MF) const override {
+    return true;
+  }
+
+  bool useFPForScavengingIndex(const MachineFunction &MF) const override {
+    return true;
+  }
+
   // Debug information queries.
   Register getFrameRegister(const MachineFunction &MF) const override;
 };

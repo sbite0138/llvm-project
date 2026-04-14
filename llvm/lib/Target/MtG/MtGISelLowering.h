@@ -70,6 +70,8 @@ enum NodeType : unsigned {
   DADD,
   WRAP_ADDR, // Wrap address node for global addresses.
   OUTPUT,
+  INPUT_A, // Read a value from Alice's input port.
+  INPUT_B, // Read a value from Bob's input port.
 };
 }
 

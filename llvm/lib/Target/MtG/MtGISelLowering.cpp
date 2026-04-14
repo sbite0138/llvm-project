@@ -223,6 +223,31 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     Chain = DAG.getNode(MtGISD::OUTPUT, DL, MVT::Other, Chain, Arg);
     return Chain;
   }
+
+  // Intercept calls to the MtG input builtins. They lower directly to the
+  // hardware AInput / BInput instructions and produce an i32 result.
+  auto matchInput = [&](StringRef Name) {
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(CLI.Callee))
+      if (const Function *F = dyn_cast<Function>(GA->getGlobal()))
+        return F->getName() == Name && F->arg_size() == 0;
+    if (auto *ES = dyn_cast<ExternalSymbolSDNode>(CLI.Callee))
+      return StringRef(ES->getSymbol()) == Name;
+    return false;
+  };
+  bool isInputA = matchInput("__mtg_input_a");
+  bool isInputB = matchInput("__mtg_input_b");
+  if (isInputA || isInputB) {
+    assert(CLI.OutVals.empty() && "__mtg_input_* takes no arguments");
+    assert(CLI.Ins.size() == 1 && CLI.Ins[0].VT == MVT::i32 &&
+           "__mtg_input_* returns a single i32");
+    SDLoc DL = CLI.DL;
+    unsigned Opc = isInputA ? MtGISD::INPUT_A : MtGISD::INPUT_B;
+    SDValue Result = DAG.getNode(Opc, DL,
+                                 DAG.getVTList(MVT::i32, MVT::Other), Chain);
+    Chain = Result.getValue(1);
+    InVals.push_back(Result.getValue(0));
+    return Chain;
+  }
   SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
   SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
   SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
@@ -515,6 +540,10 @@ const char *MtGTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "MtGISD::SELECT_CC";
   case MtGISD::DADD:
     return "MtGISD::DADD";
+  case MtGISD::INPUT_A:
+    return "MtGISD::INPUT_A";
+  case MtGISD::INPUT_B:
+    return "MtGISD::INPUT_B";
   }
   return nullptr;
 }

@@ -351,6 +351,21 @@ def OUTPUT : CCRForm<0b01000011, (outs), (ins GR:$src1),
                     "Output\t $src1", [(MtGISD_OUTPUT GR:$src1)]> {
 }
 
+// Inputs: AInput (X=2,Y=reg,Z=0) and BInput (X=2,Y=reg,Z=1).
+def SDT_MtGInput : SDTypeProfile<1, 0, [SDTCisVT<0, i32>]>;
+
+def MtGISD_INPUT_A : SDNode<"MtGISD::INPUT_A", SDT_MtGInput,
+                            [SDNPHasChain, SDNPSideEffect]>;
+def MtGISD_INPUT_B : SDNode<"MtGISD::INPUT_B", SDT_MtGInput,
+                            [SDNPHasChain, SDNPSideEffect]>;
+
+let hasSideEffects = 1, mayLoad = 1 in {
+def INPUTA : CRCForm<0b00100000, (outs GR:$dst), (ins),
+                    "AInput\t $dst", [(set GR:$dst, (MtGISD_INPUT_A))]>;
+def INPUTB : CRCForm<0b00100001, (outs GR:$dst), (ins),
+                    "BInput\t $dst", [(set GR:$dst, (MtGISD_INPUT_B))]>;
+}
+
 
 let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {
   def RETURN  : Pseudo<(outs), (ins), "Return",  []> {

@@ -564,6 +564,56 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
       MtG::R0, MtG::R1, MtG::R2, MtG::R3, MtG::R4, MtG::R5, MtG::R6, MtG::R7};
   auto RegIdx = 0;
   switch (MI.getOpcode()) {
+  case MtG::SELECT_MACRO: {
+    // "$dst = SELECT_MACRO $cond, $tval, $fval"
+    //  →  dst = (cond != 0) * tval + (cond == 0) * fval
+    //
+    // Implemented purely with arithmetic + flag ops: FIsZero sets FLAG from
+    // $cond, SetNF materializes 1-if-nonzero into a scratch, SetF
+    // materializes 1-if-zero into another, and the two products are summed.
+    //
+    // No block splitting / PHI is needed, and we don't go through R0, which
+    // avoids the BranchFolder tail-merge hazards that stem from
+    // "MOVE $dst, $r0" patterns.
+    //
+    // MULT and ADD have "$src1 = $dst" tied constraints; in SSA we still
+    // feed distinct vregs as src1/dst and let TwoAddressInstructionPass
+    // insert the necessary COPY later.
+    Register DstReg = MI.getOperand(0).getReg();
+    Register CondReg = MI.getOperand(1).getReg();
+    Register TValReg = MI.getOperand(2).getReg();
+    Register FValReg = MI.getOperand(3).getReg();
+
+    Register CReg = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register NCReg = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register TProdReg = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register FProdReg = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    // FLAG = (CondReg == 0)
+    BuildMI(*MBB, MI, DL, TII.get(MtG::FISZERO)).addUse(CondReg);
+    // CReg = !FLAG  (1 if CondReg != 0)
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SETNF), CReg);
+    // NCReg = FLAG  (1 if CondReg == 0)
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SETF), NCReg);
+
+    // TProdReg = CReg * TValReg
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MULT), TProdReg)
+        .addUse(CReg)
+        .addUse(TValReg);
+
+    // FProdReg = NCReg * FValReg
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MULT), FProdReg)
+        .addUse(NCReg)
+        .addUse(FValReg);
+
+    // DstReg = TProdReg + FProdReg
+    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), DstReg)
+        .addUse(TProdReg)
+        .addUse(FProdReg);
+
+    MI.eraseFromParent();
+    break;
+  }
   // case MtG::AND_MACRO: {
 
   //   auto *LoopMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());

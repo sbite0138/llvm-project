@@ -117,11 +117,12 @@ static void emitEmergencyReload(MachineBasicBlock &MBB,
 
 const MCPhysReg *
 MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  const MtGFrameLowering *TFI = getFrameLowering(*MF);
-  const Function *F = &MF->getFunction();
-  static const MCPhysReg CalleeSavedRegs[] = {
-      MtG::R1, MtG::R2, MtG::R3, MtG::R4,  MtG::R5, MtG::R6,
-      MtG::R7, MtG::R8, MtG::R9, MtG::R10, MtG::R11};
+  // R0/R2/R6/FLAG are reserved (handled separately). R1 is now a regular
+  // allocatable register — it used to be the (uninitialized) frame
+  // register but the backend now uses R2 directly. None of the
+  // allocatable registers are callee-saved by convention; functions
+  // simply spill what they need to temporary slots themselves.
+  static const MCPhysReg CalleeSavedRegs[] = {0};
   return CalleeSavedRegs;
 }
 
@@ -130,15 +131,15 @@ BitVector MtGRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // FLAG: condition-flag register (read by SetF/SetNF and all branches).
   // R0: universal scratch — NumBuild's implicit destination and the operand
   //     to Mult/Divide in every macro that materializes a constant.
-  // R1: frame register (FP).
-  // R2: stack pointer (SP).
+  // R2: stack pointer (SP). MtG also uses R2 directly as the frame base
+  //     (we no longer maintain a separate frame pointer in R1; see
+  //     getFrameRegister below). The emergency-spill slot lives at *R2.
   // R6: Divide's quotient destination. Keeping it reserved means it never
   //     holds a user virtual register, so byte-wise Load/Store expansions
   //     may use it as a scratch between Divides (when it happens to be
   //     free from the hardware's POV).
   Reserved.set(MtG::FLAG);
   Reserved.set(MtG::R0);
-  Reserved.set(MtG::R1);
   Reserved.set(MtG::R2);
   Reserved.set(MtG::R6);
 
@@ -274,5 +275,13 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 }
 
 Register MtGRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  return MtG::R1;
+  // Use SP (R2) as the frame base. The frame-offset formula in
+  // eliminateFrameIndex (`getObjectOffset(FI) + getStackSize() + SPAdj`)
+  // produces an SP-relative offset, so the base must really be the
+  // post-prologue SP. Previously we returned R1, which was never
+  // initialized in the prologue and held the caller's SP at runtime —
+  // that made every frame access land in the *caller's* memory area
+  // (latently broken on real hardware; only ursa's sparse memory model
+  // tolerated it).
+  return MtG::R2;
 }

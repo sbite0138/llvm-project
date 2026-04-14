@@ -97,6 +97,7 @@ public:
 
   // SDValue LowerShifts(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
   // SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;

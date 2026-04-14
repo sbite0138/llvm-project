@@ -100,7 +100,43 @@ SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   }
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
+  case ISD::SDIV:
+    return LowerSDIV(Op, DAG);
   }
+}
+
+// Expand sdiv into the standard "absolute value + udiv + sign fix-up"
+// sequence. MtG hardware only has an unsigned Divide instruction, but
+// the existing udiv pattern already lowers to it, so we lean on that.
+//
+//   sa = a >> 31           (arithmetic, gives 0 or -1)
+//   sb = b >> 31
+//   |a| = (a ^ sa) - sa
+//   |b| = (b ^ sb) - sb
+//   q = udiv(|a|, |b|)
+//   sign = sa ^ sb         (-1 if signs of a, b differ; 0 otherwise)
+//   result = (q ^ sign) - sign
+SDValue MtGTargetLowering::LowerSDIV(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  EVT VT = Op.getValueType();
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+
+  SDValue Shift31 = DAG.getConstant(31, DL, VT);
+  SDValue SA = DAG.getNode(ISD::SRA, DL, VT, LHS, Shift31);
+  SDValue SB = DAG.getNode(ISD::SRA, DL, VT, RHS, Shift31);
+
+  SDValue AbsA = DAG.getNode(
+      ISD::SUB, DL, VT, DAG.getNode(ISD::XOR, DL, VT, LHS, SA), SA);
+  SDValue AbsB = DAG.getNode(
+      ISD::SUB, DL, VT, DAG.getNode(ISD::XOR, DL, VT, RHS, SB), SB);
+
+  SDValue Quot = DAG.getNode(ISD::UDIV, DL, VT, AbsA, AbsB);
+
+  SDValue ResultSign = DAG.getNode(ISD::XOR, DL, VT, SA, SB);
+  return DAG.getNode(
+      ISD::SUB, DL, VT,
+      DAG.getNode(ISD::XOR, DL, VT, Quot, ResultSign), ResultSign);
 }
 
 //===----------------------------------------------------------------------===//

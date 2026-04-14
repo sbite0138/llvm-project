@@ -249,7 +249,7 @@ def MULT : CRRForm<0b1010, (outs GR:$dst), (ins GR:$src1, GR:$src2),
 
 
 def DIVIDE : CCRForm<0b01000110, (outs GR:$dst), (ins GR:$src1),
-                    "Divide\t $dst ; $dst, R6 <- ($dst / R0, $dst % R0)",[]>{
+                    "Divide\t $dst ; R6, $dst <- ($dst / R0, $dst % R0)",[]>{
       let Uses = [R0];
       let Defs = [R6];
     }

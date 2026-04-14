@@ -382,13 +382,6 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), RVLocs,
                  *DAG.getContext());
 
-  for (unsigned i = 0; i != Outs.size(); ++i) {
-    auto VT = Outs[i].VT;
-    if (VT != MVT::i32) {
-      // print VT type
-      errs() << "VT: " << VT.getScalarType() << '\n';
-    }
-  }
   CCInfo.AnalyzeReturn(Outs, RetCC_MtG);
   // SDValue Glue;
   // SmallVector<SDValue, 4> RetOps(1, Chain);
@@ -402,10 +395,6 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     assert(VA.isRegLoc() && "Can only return in registers!");
     assert(RVLocs[i].getValVT() == RVLocs[i].getLocVT() &&
            "Return value and register value types must match");
-    dbgs() << "[!!!!] MtGTargetLowering::LowerReturn: "
-           << "CallConv: " << CallConv << ", isVarArg: " << isVarArg
-           << ", Chain: " << Chain.getNode() << ", Flag: " << Flag.getNode()
-           << "\n";
 
     Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Val, Flag);
 
@@ -414,10 +403,6 @@ MtGTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     Flag = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
-  dbgs() << "MtGTargetLowering::LowerReturn: "
-         << "CallConv: " << CallConv << ", isVarArg: " << isVarArg
-         << ", Chain: " << Chain.getNode() << ", Flag: " << Flag.getNode()
-         << "\n";
   RetOps[0] = Chain; // Update chain.
 
   // Add the glue if we have it.
@@ -874,7 +859,6 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
 
 SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
                                               SelectionDAG &DAG) const {
-  llvm::dbgs() << "LowerGlobalAddress\n";
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
 
   int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();

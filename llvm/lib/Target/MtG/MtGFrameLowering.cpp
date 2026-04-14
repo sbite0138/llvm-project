@@ -37,14 +37,12 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
   MachineFrameInfo &MFI = MF.getFrameInfo();
   const MtGInstrInfo &TII =
       *static_cast<const MtGInstrInfo *>(STI.getInstrInfo());
-  MFI.dump(MF);
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
   unsigned SP = MtG::R2;
   uint64_t StackSize = MFI.getStackSize();
   if (StackSize == 0 && !MFI.adjustsStack())
     return;
-  dbgs() << "[emitPrologue] StackSize: " << StackSize << "\n";
   const MCRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   // Reserve 4 extra bytes at the bottom of the frame (at *SP) for the
   // scavenger's emergency-spill slot. MtG's lack of base+offset addressing

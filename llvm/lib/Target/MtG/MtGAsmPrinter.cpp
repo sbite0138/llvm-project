@@ -148,9 +148,6 @@ bool MtGAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
 
 //===----------------------------------------------------------------------===//
 void MtGAsmPrinter::emitInstruction(const MachineInstr *MI) {
-  llvm::dbgs() << "MtG MCInst: ";
-  MI->dump();
-
   MtG_MC::verifyInstructionPredicates(MI->getOpcode(),
                                       getSubtargetInfo().getFeatureBits());
 

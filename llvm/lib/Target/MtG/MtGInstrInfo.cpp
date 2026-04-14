@@ -36,6 +36,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "mtg-instr-info"
+
 #define GET_INSTRINFO_CTOR_DTOR
 #include "MtGGenInstrInfo.inc"
 
@@ -713,14 +715,15 @@ bool MtGInstrInfo::isRegisterLiveAfter(const MachineInstr &MI,
   for (auto I = NextI; I != MBB->end(); ++I) {
     // Check if the register is read (used)
     if (I->readsRegister(Reg, &getRegisterInfo())) {
-      llvm::dbgs() << "Register " << printReg(Reg, &getRegisterInfo())
-                   << " is live after instruction: " << *I << "\n";
-      llvm::dbgs() << "In function: " << MF->getName() << "\n";
-      llvm::dbgs() << "In basic block: " << MBB->getName() << "\n";
-      llvm::dbgs() << "In instruction: ";
-      MI.dump();
-
-      MF->dump();
+      LLVM_DEBUG({
+        dbgs() << "Register " << printReg(Reg, &getRegisterInfo())
+               << " is live after instruction: " << *I << "\n";
+        dbgs() << "In function: " << MF->getName() << "\n";
+        dbgs() << "In basic block: " << MBB->getName() << "\n";
+        dbgs() << "In instruction: ";
+        MI.dump();
+        MF->dump();
+      });
       return true;
     }
     // Check if the register is redefined (killed)
@@ -733,13 +736,15 @@ bool MtGInstrInfo::isRegisterLiveAfter(const MachineInstr &MI,
   // If the register is live-in to any successor block, it's live
   for (MachineBasicBlock *Succ : MBB->successors()) {
     if (Succ->isLiveIn(Reg)) {
-      llvm::dbgs() << "Register " << printReg(Reg, &getRegisterInfo())
-                   << " is live after instruction: " << *Succ << "\n";
-      llvm::dbgs() << "In function: " << MF->getName() << "\n";
-      llvm::dbgs() << "In basic block: " << MBB->getName() << "\n";
-      llvm::dbgs() << "In instruction: ";
-      MI.dump();
-      MF->dump();
+      LLVM_DEBUG({
+        dbgs() << "Register " << printReg(Reg, &getRegisterInfo())
+               << " is live after instruction: " << *Succ << "\n";
+        dbgs() << "In function: " << MF->getName() << "\n";
+        dbgs() << "In basic block: " << MBB->getName() << "\n";
+        dbgs() << "In instruction: ";
+        MI.dump();
+        MF->dump();
+      });
       return true;
     }
   }

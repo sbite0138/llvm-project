@@ -564,6 +564,139 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
       MtG::R0, MtG::R1, MtG::R2, MtG::R3, MtG::R4, MtG::R5, MtG::R6, MtG::R7};
   auto RegIdx = 0;
   switch (MI.getOpcode()) {
+  case MtG::AND_MACRO:
+  case MtG::OR_MACRO:
+  case MtG::XOR_MACRO: {
+    // 32-iteration bit decomposition loop. Each iteration extracts the
+    // current bit from each source via SubCond+SetNF, combines the two
+    // bits per the operation (AND = ba*bb, OR = ba+bb-ba*bb,
+    // XOR = ba+bb-2*ba*bb), then adds bit*combined into the accumulator
+    // and halves the bit for the next iteration. The loop exits when
+    // bit = 0.
+    //
+    // SubCond rZ, rY: if rZ >= rY then rZ -= rY, FLAG=0; else FLAG=1.
+    // So after `SubCond Anew, A, bit`, FLAG=0 iff "bit was set in A" and
+    // SetNF gives us 1/0 accordingly.
+    unsigned Op = MI.getOpcode();
+    Register DstReg = MI.getOperand(0).getReg();
+    Register Src1Reg = MI.getOperand(1).getReg();
+    Register Src2Reg = MI.getOperand(2).getReg();
+
+    MachineBasicBlock *EntryMBB = MBB;
+    auto *LoopMBB = MF.CreateMachineBasicBlock(EntryMBB->getBasicBlock());
+    auto *ExitMBB = MF.CreateMachineBasicBlock(EntryMBB->getBasicBlock());
+
+    MF.insert(std::next(MachineFunction::iterator(EntryMBB)), LoopMBB);
+    MF.insert(std::next(MachineFunction::iterator(LoopMBB)), ExitMBB);
+
+    // Move the tail (everything after MI) into ExitMBB and forward the
+    // original EntryMBB successors / PHIs to it.
+    ExitMBB->splice(ExitMBB->end(), EntryMBB,
+                    std::next(MachineBasicBlock::iterator(MI)),
+                    EntryMBB->end());
+    ExitMBB->transferSuccessorsAndUpdatePHIs(EntryMBB);
+
+    EntryMBB->addSuccessor(LoopMBB);
+    LoopMBB->addSuccessor(LoopMBB);
+    LoopMBB->addSuccessor(ExitMBB);
+
+    // ---- Initial values, computed in EntryMBB just before MI. ----
+    Register BitInit = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register AInit = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register BInit = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register ResultInit = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), BitInit)
+        .addImm((int64_t)(1LL << 31));
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVE), AInit).addUse(Src1Reg);
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVE), BInit).addUse(Src2Reg);
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::ZERO), ResultInit);
+
+    // ---- Loop body vregs. ----
+    Register BitPhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register APhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register BPhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register ResultPhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    Register ANew = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register BNew = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Ba = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Bb = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register BaProd = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Contrib = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register ResultNew = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register BitNew = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Cond = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    // PHIs at the head of LoopMBB.
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI), BitPhi)
+        .addReg(BitInit).addMBB(EntryMBB)
+        .addReg(BitNew).addMBB(LoopMBB);
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI), APhi)
+        .addReg(AInit).addMBB(EntryMBB)
+        .addReg(ANew).addMBB(LoopMBB);
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI), BPhi)
+        .addReg(BInit).addMBB(EntryMBB)
+        .addReg(BNew).addMBB(LoopMBB);
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI), ResultPhi)
+        .addReg(ResultInit).addMBB(EntryMBB)
+        .addReg(ResultNew).addMBB(LoopMBB);
+
+    // Extract bit from A.
+    BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), ANew)
+        .addUse(APhi).addUse(BitPhi);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), Ba);
+    // Extract bit from B.
+    BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), BNew)
+        .addUse(BPhi).addUse(BitPhi);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), Bb);
+    // BaProd = bit-level operation on Ba and Bb (each is 0 or 1).
+    //   AND : Ba * Bb                         (Mult)
+    //   OR  : (Ba + Bb) > 0  →  FIsZero + SetNF on Ba+Bb
+    //   XOR : (Ba + Bb) odd  →  Halve sets FLAG = oddness; SetF
+    Register Combined;
+    if (Op == MtG::AND_MACRO) {
+      BuildMI(LoopMBB, DL, TII.get(MtG::MULT), BaProd).addUse(Ba).addUse(Bb);
+      Combined = BaProd;
+    } else {
+      // ApB = Ba + Bb (∈ {0,1,2}).
+      Register ApB = MRI.createVirtualRegister(&MtG::GRRegClass);
+      BuildMI(LoopMBB, DL, TII.get(MtG::ADD), ApB).addUse(Ba).addUse(Bb);
+      Combined = MRI.createVirtualRegister(&MtG::GRRegClass);
+      if (Op == MtG::OR_MACRO) {
+        BuildMI(LoopMBB, DL, TII.get(MtG::FISZERO)).addUse(ApB);
+        BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), Combined);
+      } else {
+        // XOR: HALVE sets FLAG = (ApB odd) and produces an unused half.
+        Register ApBHalved = MRI.createVirtualRegister(&MtG::GRRegClass);
+        BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), ApBHalved).addUse(ApB);
+        BuildMI(LoopMBB, DL, TII.get(MtG::SETF), Combined);
+      }
+    }
+    // Contrib = Combined * bit (= bit if Combined was 1, 0 otherwise).
+    BuildMI(LoopMBB, DL, TII.get(MtG::MULT), Contrib)
+        .addUse(Combined).addUse(BitPhi);
+    // ResultNew = ResultPhi + Contrib.
+    BuildMI(LoopMBB, DL, TII.get(MtG::ADD), ResultNew)
+        .addUse(ResultPhi).addUse(Contrib);
+    // BitNew = bit / 2.
+    BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), BitNew).addUse(BitPhi);
+    // Cond = (BitNew != 0).
+    BuildMI(LoopMBB, DL, TII.get(MtG::FISZERO)).addUse(BitNew);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), Cond);
+    // Branch back if Cond != 0 (i.e., still have bits to process).
+    BuildMI(LoopMBB, DL, TII.get(MtG::BRCOND_PSEUDO))
+        .addReg(Cond).addImm(0).addMBB(LoopMBB);
+
+    // ExitMBB: dst = final result.
+    BuildMI(*ExitMBB, ExitMBB->begin(), DL, TII.get(MtG::MOVE), DstReg)
+        .addUse(ResultNew);
+
+    MI.eraseFromParent();
+    // Continue inserting subsequent ISel output into ExitMBB rather than the
+    // (now-empty) EntryMBB.
+    return ExitMBB;
+  }
   case MtG::SELECT_MACRO: {
     // "$dst = SELECT_MACRO $cond, $tval, $fval"
     //  →  dst = (cond != 0) * tval + (cond == 0) * fval

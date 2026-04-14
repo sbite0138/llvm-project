@@ -17,6 +17,7 @@
 #include "MtGTargetMachine.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -111,20 +112,49 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     const int64_t totalOffset =
         MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj;
 
-    // Pick a scratch for the FP + offset computation. The byte-wise FI
-    // pseudo declares Defs = [R0..R7], so regalloc is guaranteed no user
-    // vreg is live across it in R3-R5 / R7; we only need to avoid OpReg
-    // itself (which is the value being spilled / the destination of the
-    // load — its live value is still needed here).
+    // We need a scratch register to compute the address (FP + offset). MtG
+    // has no base+offset store, so the scratch is mandatory; the trailing
+    // STOREBYTEWISE / LOADBYTEWISE will then take that scratch as its
+    // address operand.
+    //
+    // Liveness analysis (LivePhysRegs walked backwards through MBB to MI)
+    // tells us which physical registers carry a value at this point. We
+    // pick the first allocatable register that's both *not live in* to MI
+    // and *not equal to OpReg* — OpReg's live value is still needed here
+    // (we're either about to store from it or, for the load-FI case, the
+    // pseudo will produce its new value via the LOADBYTEWISE expansion
+    // and we mustn't trash it before that).
+    LivePhysRegs LivePhys(*this);
+    LivePhys.addLiveOuts(MBB);
+    for (auto It = MBB.rbegin(); It != MBB.rend(); ++It) {
+      if (&*It == &MI)
+        break;
+      LivePhys.stepBackward(*It);
+    }
+
+    static const Register Candidates[] = {MtG::R3, MtG::R4, MtG::R5, MtG::R7,
+                                          MtG::R8, MtG::R9, MtG::R10, MtG::R11};
     Register TmpReg;
-    for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
-      if (R != OpReg) {
+    for (Register R : Candidates) {
+      if (R == OpReg)
+        continue;
+      if (LivePhys.available(MF.getRegInfo(), R)) {
         TmpReg = R;
         break;
       }
     }
-    assert(TmpReg.isValid() &&
-           "Could not find scratch for FI address computation");
+
+    if (!TmpReg.isValid()) {
+      // Every allocatable register is live and the only "free" candidate
+      // would be OpReg itself. Real emergency spill (save a victim into a
+      // dedicated FP-anchored slot via the FP/SP-trick, use the victim as
+      // scratch, restore it afterwards) lives at the bottom of the file
+      // but isn't wired up yet — error loudly so we notice instead of
+      // silently miscompiling.
+      report_fatal_error(
+          "MtG: out of scratch registers for spill address computation; "
+          "emergency-slot fallback is not implemented yet.");
+    }
 
     if (TmpReg != getFrameRegister(MF))
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), TmpReg)

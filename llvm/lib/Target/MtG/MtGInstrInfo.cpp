@@ -419,6 +419,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(SrcReg1);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETNF), DstReg);
     MI.eraseFromParent();
+    return true;
   } else if (MI.getOpcode() == MtG::NEQ_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg1 = MI.getOperand(1).getReg();
@@ -431,6 +432,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(SrcReg1);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
+    return true;
   } else if (MI.getOpcode() == MtG::LT_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg1 = MI.getOperand(1).getReg();
@@ -440,6 +442,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(SrcReg2);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
+    return true;
   } else if (MI.getOpcode() == MtG::GT_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg1 = MI.getOperand(1).getReg();
@@ -449,6 +452,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(SrcReg1);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
+    return true;
   } else if (MI.getOpcode() == MtG::RET_PSEUDO) {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
         .addImm(0)

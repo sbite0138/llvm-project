@@ -46,9 +46,15 @@ void MtGFrameLowering::emitPrologue(MachineFunction &MF,
     return;
   dbgs() << "[emitPrologue] StackSize: " << StackSize << "\n";
   const MCRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-  TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
-  unsigned CFIIndex =
-      MF.addFrameInst(MCCFIInstruction::cfiDefCfaOffset(nullptr, -StackSize));
+  // Reserve 4 extra bytes at the bottom of the frame (at *SP) for the
+  // scavenger's emergency-spill slot. MtG's lack of base+offset addressing
+  // means accessing the emergency slot by computing FP+offset would itself
+  // require a free scratch register — putting it at *SP lets emergency
+  // save/reload code use R2 directly without an address calculation.
+  TII.adjustStackPtr(SP, -(int64_t)(StackSize + kEmergencySlotSize), MBB,
+                     MBBI);
+  unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::cfiDefCfaOffset(
+      nullptr, -(int64_t)(StackSize + kEmergencySlotSize)));
   BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
 
@@ -87,7 +93,7 @@ void MtGFrameLowering::emitEpilogue(MachineFunction &MF,
   if (!StackSize)
     return;
 
-  TII.adjustStackPtr(SP, StackSize, MBB, MBBI);
+  TII.adjustStackPtr(SP, StackSize + kEmergencySlotSize, MBB, MBBI);
 }
 
 MachineBasicBlock::iterator MtGFrameLowering::eliminateCallFramePseudoInstr(

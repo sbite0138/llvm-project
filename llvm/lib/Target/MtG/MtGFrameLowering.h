@@ -25,6 +25,12 @@ class MtGRegisterInfo;
 class MtGFrameLowering : public TargetFrameLowering {
 protected:
 public:
+  // Number of bytes reserved at *SP for the scavenger's emergency-spill
+  // slot. See MtGRegisterInfo::eliminateFrameIndex / emitEmergencySave for
+  // why this lives at SP+0..SP+3 specifically (no scratch is required to
+  // address it that way).
+  static constexpr int64_t kEmergencySlotSize = 4;
+
   MtGFrameLowering(const MtGSubtarget &STI);
 
   const MtGSubtarget &STI;

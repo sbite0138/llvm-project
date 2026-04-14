@@ -13,6 +13,7 @@
 #include "MtGRegisterInfo.h"
 #include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
+#include "MtGFrameLowering.h"
 #include "MtGMachineFunctionInfo.h"
 #include "MtGTargetMachine.h"
 #include "llvm/ADT/BitVector.h"
@@ -38,6 +39,81 @@ using namespace llvm;
 
 // FIXME: Provide proper call frame setup / destroy opcodes.
 MtGRegisterInfo::MtGRegisterInfo() : MtGGenRegisterInfo(0) {}
+
+namespace {
+
+// Emit a byte-wise save of $VictimReg into the emergency-spill slot at *SP
+// (the 4 extra bytes reserved by MtGFrameLowering::emitPrologue). The
+// expansion deliberately uses no scratch register beyond what the MtG ISA
+// already implicitly owns:
+//   * R0 holds the constant 256 used by Divide.
+//   * R6 receives Divide's quotient (the upper bytes for the next iteration).
+//   * R2 (SP) is the address iterator — it is mutated and restored.
+//   * VictimReg itself is destroyed during byte extraction, but its value is
+//     persisted to memory so destroying it is fine.
+static void emitEmergencySave(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator II,
+                              const TargetInstrInfo &TII, Register VictimReg) {
+  DebugLoc DL = II != MBB.end() ? II->getDebugLoc() : DebugLoc();
+  // R0 = 256
+  BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
+  for (int i = 0; i < 4; ++i) {
+    // VictimReg = VictimReg % 256 (low byte); R6 = VictimReg / 256 (upper).
+    BuildMI(MBB, II, DL, TII.get(MtG::DIVIDE), VictimReg).addUse(VictimReg);
+    // *SP = low byte
+    BuildMI(MBB, II, DL, TII.get(MtG::STORE)).addUse(MtG::R2).addUse(VictimReg);
+    if (i < 3) {
+      // VictimReg <- upper bytes for the next iteration.
+      BuildMI(MBB, II, DL, TII.get(MtG::MOVE), VictimReg).addUse(MtG::R6);
+      // SP++ : address advances to the next byte slot.
+      BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
+    }
+  }
+  // Restore SP (we incremented it 3 times).
+  for (int i = 0; i < 3; ++i)
+    BuildMI(MBB, II, DL, TII.get(MtG::SUB1COND), MtG::R2).addUse(MtG::R2);
+}
+
+// Emit a byte-wise reload of $VictimReg from the emergency-spill slot at
+// *SP. We process the high byte first so the accumulator can be shifted up
+// by 256 (via Mult) before each lower byte is added in.
+//   * R0 holds the constant 256.
+//   * R6 acts as the per-iteration byte temp (no Divide runs in this loop,
+//     so R6 is stable). It is allowed because R6 is reserved and never
+//     carries a user value.
+//   * R2 (SP) is the address iterator — destroyed and restored, ending at
+//     its original position.
+//   * VictimReg is the destination of the reload.
+static void emitEmergencyReload(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator II,
+                                const TargetInstrInfo &TII,
+                                Register VictimReg) {
+  DebugLoc DL = II != MBB.end() ? II->getDebugLoc() : DebugLoc();
+  // SP += 3 : start at the high-byte slot (SP+3).
+  for (int i = 0; i < 3; ++i)
+    BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
+  // R0 = 256
+  BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
+  // VictimReg = byte 3
+  BuildMI(MBB, II, DL, TII.get(MtG::LOAD), VictimReg).addUse(MtG::R2);
+  for (int i = 0; i < 3; ++i) {
+    // SP -= 1 : move to the next-lower byte (i + bytes left).
+    BuildMI(MBB, II, DL, TII.get(MtG::SUB1COND), MtG::R2).addUse(MtG::R2);
+    // VictimReg <<= 8
+    BuildMI(MBB, II, DL, TII.get(MtG::MULT), VictimReg)
+        .addUse(VictimReg)
+        .addUse(MtG::R0);
+    // R6 = next byte
+    BuildMI(MBB, II, DL, TII.get(MtG::LOAD), MtG::R6).addUse(MtG::R2);
+    // VictimReg += byte
+    BuildMI(MBB, II, DL, TII.get(MtG::ADD), VictimReg)
+        .addUse(VictimReg)
+        .addUse(MtG::R6);
+  }
+  // SP is now back at its original position (3 ADD1's matched by 3 SUB1COND's).
+}
+
+} // anonymous namespace
 
 const MCPhysReg *
 MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
@@ -144,16 +220,24 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       }
     }
 
-    if (!TmpReg.isValid()) {
-      // Every allocatable register is live and the only "free" candidate
-      // would be OpReg itself. Real emergency spill (save a victim into a
-      // dedicated FP-anchored slot via the FP/SP-trick, use the victim as
-      // scratch, restore it afterwards) lives at the bottom of the file
-      // but isn't wired up yet — error loudly so we notice instead of
-      // silently miscompiling.
-      report_fatal_error(
-          "MtG: out of scratch registers for spill address computation; "
-          "emergency-slot fallback is not implemented yet.");
+    bool NeedEmergency = !TmpReg.isValid();
+    Register VictimReg;
+    if (NeedEmergency) {
+      // Every allocatable register at this point is either live or equal to
+      // OpReg. Pick a victim (any allocatable register != OpReg), save its
+      // value to the emergency slot at *SP via the byte-wise FP-trick, then
+      // use the victim as our scratch. We'll reload the victim after the
+      // FI elimination's emitted code is in place.
+      for (Register R : Candidates) {
+        if (R != OpReg) {
+          VictimReg = R;
+          break;
+        }
+      }
+      assert(VictimReg.isValid() &&
+             "MtG: not even a victim register available for emergency spill");
+      emitEmergencySave(MBB, II, *TII, VictimReg);
+      TmpReg = VictimReg;
     }
 
     if (TmpReg != getFrameRegister(MF))
@@ -174,6 +258,13 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)
                          .addUse(TmpReg));
     }
+
+    if (NeedEmergency) {
+      // Now reload the victim's value so subsequent code sees its
+      // original contents.
+      emitEmergencyReload(MBB, II, *TII, VictimReg);
+    }
+
     MI.eraseFromParent();
 
     return true;

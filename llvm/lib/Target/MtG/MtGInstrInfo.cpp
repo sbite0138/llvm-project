@@ -166,6 +166,27 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     expandPostRAPseudo(*RemMI);
     MI.eraseFromParent();
     return true;
+  } else if (MI.getOpcode() == MtG::NEG_MACRO) {
+    // "$dst = NEG_MACRO $dst"  (src1 is tied to dst by the .td Constraint)
+    //   →  NUMBUILD_MACRO -1   ; R0 = 2^32 - 1 = -1 (mod 2^32)
+    //       MULT $dst, R0      ; $dst *= -1
+    auto DstReg = MI.getOperand(0).getReg();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(-1);
+    auto MultMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
+    // Prevent BranchFolder tail-merge from separating the MULT from the
+    // NumBuilds that set R0; the MtG jump expansion later clobbers R0.
+    MultMI->setFlag(MachineInstr::NoMerge);
+    MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildMI);
+    return true;
   } else if (MI.getOpcode() == MtG::SUB_MACRO) {
 
     auto DstReg = MI.getOperand(0).getReg();
@@ -174,8 +195,10 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
     assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
            "Invalid SrcReg - register conflicts with macro expansion");
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), SrcReg)
-        .addUse(SrcReg);
+    auto NegMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), SrcReg)
+            .addUse(SrcReg);
+    expandPostRAPseudo(*NegMI);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
         .addUse(SrcReg);

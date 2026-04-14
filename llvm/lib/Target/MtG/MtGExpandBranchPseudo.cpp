@@ -14,6 +14,13 @@
 // block order, so we can correctly pick forward vs. backward opcodes when
 // expanding BR_PSEUDO and BRCOND_PSEUDO.
 //
+// It also expands MOVEIMM_MACRO at this late stage. Expanding earlier lets
+// BranchFolder's tail-merge (invoked again from inside MachineBlockPlacement)
+// hoist the resulting "MOVE $dst, $r0" past a BR_PSEUDO that clobbers $r0,
+// corrupting the value. Keeping MOVEIMM_MACRO opaque until after block
+// placement prevents the merge since two MOVEIMM_MACROs with distinct
+// immediates are not identical pseudos.
+//
 //===----------------------------------------------------------------------===//
 
 #include "MtG.h"
@@ -95,6 +102,19 @@ bool MtGExpandBranchPseudo::expand(
     return true;
   }
 
+  if (Opc == MtG::MOVEIMM_MACRO) {
+    // "$dst = MOVEIMM_MACRO imm" → "NUMBUILD_MACRO imm; MOVE $dst, $r0".
+    // NUMBUILD_MACRO itself is expanded below in expandPostRAPseudo.
+    Register DstReg = MI.getOperand(0).getReg();
+    auto NumBuildMI = BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
+                          .addImm(MI.getOperand(1).getImm());
+    if (DstReg != MtG::R0)
+      BuildMI(MBB, MI, DL, TII.get(MtG::MOVE), DstReg).addUse(MtG::R0);
+    TII.expandPostRAPseudo(*NumBuildMI);
+    MI.eraseFromParent();
+    return true;
+  }
+
   return false;
 }
 
@@ -111,7 +131,8 @@ bool MtGExpandBranchPseudo::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
       if (MI.getOpcode() == MtG::BR_PSEUDO ||
-          MI.getOpcode() == MtG::BRCOND_PSEUDO) {
+          MI.getOpcode() == MtG::BRCOND_PSEUDO ||
+          MI.getOpcode() == MtG::MOVEIMM_MACRO) {
         Changed |= expand(MBB, MI, TII, LayoutPos);
       }
     }

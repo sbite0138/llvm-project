@@ -71,7 +71,15 @@ void MtGInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
 void MtGInstPrinter::printCallTargetOperand(const MCInst *MI, uint64_t Addr,
                                             unsigned OpNo, raw_ostream &O,
                                             const char *Modifier) {
-  printOperand(MI, OpNo, O);
+  // Emit the target symbol bare (no "$" prefix) so the ursa assembler can
+  // look it up as a label, exactly like it does for JumpFwd / JumpBwd. The
+  // default printOperand() would prefix "$" for MCExpr operands, which ursa
+  // doesn't accept.
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (Op.isExpr())
+    MAI.printExpr(O, *Op.getExpr());
+  else
+    printOperand(MI, OpNo, O);
 }
 
 void MtGInstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,

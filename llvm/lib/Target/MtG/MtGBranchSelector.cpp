@@ -1,4 +1,4 @@
-//===-- MtGBranchSelector.cpp - Patch Jump displacement NumBuilds ---------===//
+//===-- MtGBranchSelector.cpp - Patch Jump/Return displacement NumBuilds --===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -17,10 +17,15 @@
 // (backward), where r0 has been built up by the two preceding NumBuilds:
 //   r0 = (12*Y1 + Z1) * 144 + (12*Y2 + Z2)
 //
+// The ret expansion uses the same NumBuild-pair / placeholder scheme for
+// Return's Z' field (Z=0 ⇒ "use r0", so we can encode an arbitrary instr
+// count). The Z' value for a Return is the distance in instructions from
+// the function entry to that Return.
+//
 // This pass runs last (right before the asm printer), assigns each real
-// instruction a linear position, computes the displacement Z from each
-// Jump to its target in instruction units, and patches the two placeholder
-// NumBuild immediates with the corresponding base-144 digits.
+// instruction a linear position, and patches both kinds of placeholders.
+// Inter-function call displacements are NOT handled here — they require
+// module-wide layout knowledge and live in MtGCallSelector.
 //
 //===----------------------------------------------------------------------===//
 
@@ -81,9 +86,60 @@ static bool isJump(unsigned Opc, bool &IsForward) {
   }
 }
 
+// Patch the two NumBuild placeholders immediately preceding MI so that r0
+// evaluates to Value when MI executes. Returns true on success.
+static bool patchPrecedingNumBuildPair(MachineInstr &MI,
+                                       MachineBasicBlock &MBB, int64_t Value) {
+  if (Value < 0) {
+    errs() << "MtGBranchSelector: negative value " << Value
+           << " for displacement placeholder: " << MI;
+    return false;
+  }
+  if (Value >= 144 * 144) {
+    // Exceeded the 2-digit NumBuild encoding range. Supporting longer
+    // displacements would require emitting more NumBuild digits, which
+    // in turn changes instruction counts and needs iteration to converge.
+    // Out of scope for now.
+    report_fatal_error("MtG branch/return displacement exceeds 2-digit "
+                       "NumBuild encoding; wider offsets are not yet "
+                       "supported");
+  }
+
+  unsigned HighDigit = Value / 144;
+  unsigned LowDigit = Value % 144;
+
+  auto StepBackToCounted = [](MachineBasicBlock::iterator It,
+                              MachineBasicBlock::iterator Begin)
+      -> MachineBasicBlock::iterator {
+    while (It != Begin) {
+      --It;
+      if (isCountedInstruction(*It))
+        return It;
+    }
+    return Begin;
+  };
+
+  auto MBBBegin = MBB.begin();
+  auto It = MI.getIterator();
+  if (It == MBBBegin)
+    return false;
+  auto NB2It = StepBackToCounted(It, MBBBegin);
+  if (NB2It == MBBBegin || NB2It->getOpcode() != MtG::NUMBUILD)
+    return false;
+  auto NB1It = StepBackToCounted(NB2It, MBBBegin);
+  if (NB1It == NB2It || NB1It->getOpcode() != MtG::NUMBUILD)
+    return false;
+
+  NB1It->getOperand(0).setImm(HighDigit / 12);
+  NB1It->getOperand(1).setImm(HighDigit % 12);
+  NB2It->getOperand(0).setImm(LowDigit / 12);
+  NB2It->getOperand(1).setImm(LowDigit % 12);
+  return true;
+}
+
 bool MtGBSel::runOnMachineFunction(MachineFunction &MF) {
-  // Assign each counted instruction a linear position, and record each
-  // block's starting position.
+  // Assign each counted instruction a linear position within the function,
+  // and record each block's starting position.
   DenseMap<const MachineInstr *, unsigned> InstrPos;
   DenseMap<const MachineBasicBlock *, unsigned> BlockStartPos;
   unsigned Pos = 0;
@@ -100,79 +156,40 @@ bool MtGBSel::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
+      unsigned Opc = MI.getOpcode();
       bool IsForward;
-      if (!isJump(MI.getOpcode(), IsForward))
-        continue;
+      if (isJump(Opc, IsForward)) {
+        assert(MI.getNumOperands() >= 1 && MI.getOperand(0).isMBB() &&
+               "Jump operand must be an MBB");
+        const MachineBasicBlock *Target = MI.getOperand(0).getMBB();
 
-      assert(MI.getNumOperands() >= 1 && MI.getOperand(0).isMBB() &&
-             "Jump operand must be an MBB");
-      const MachineBasicBlock *Target = MI.getOperand(0).getMBB();
+        unsigned JumpPos = InstrPos.lookup(&MI);
+        unsigned TargetPos = BlockStartPos.lookup(Target);
 
-      unsigned JumpPos = InstrPos.lookup(&MI);
-      unsigned TargetPos = BlockStartPos.lookup(Target);
+        // PC after the jump instruction points at JumpPos + 1.
+        //   Forward:  PC + 3Z = TargetPos  →  Z = TargetPos - (JumpPos + 1)
+        //   Backward: PC - 3Z = TargetPos  →  Z = (JumpPos + 1) - TargetPos
+        int64_t Z;
+        if (IsForward)
+          Z = (int64_t)TargetPos - (int64_t)(JumpPos + 1);
+        else
+          Z = (int64_t)(JumpPos + 1) - (int64_t)TargetPos;
 
-      // PC after the jump instruction points at JumpPos + 1.
-      //   Forward:  PC + 3Z = TargetPos  →  Z = TargetPos - (JumpPos + 1)
-      //   Backward: PC - 3Z = TargetPos  →  Z = (JumpPos + 1) - TargetPos
-      int64_t Z;
-      if (IsForward)
-        Z = (int64_t)TargetPos - (int64_t)(JumpPos + 1);
-      else
-        Z = (int64_t)(JumpPos + 1) - (int64_t)TargetPos;
-
-      if (Z < 0) {
-        // MtGExpandBranchPseudo picks direction from layout, so a negative
-        // displacement here is a bug somewhere upstream.
-        errs() << "MtGBranchSelector: negative displacement " << Z
-               << " for jump: " << MI;
-        continue;
-      }
-
-      if (Z >= 144 * 144) {
-        // Exceeded the 2-digit NumBuild encoding range. Supporting longer
-        // displacements would require emitting more NumBuild digits, which
-        // in turn changes instruction counts and needs iteration to converge.
-        // Out of scope for now.
-        report_fatal_error("MtG branch displacement exceeds 2-digit NumBuild "
-                           "encoding; wider offsets are not yet supported");
-      }
-
-      unsigned HighDigit = Z / 144;
-      unsigned LowDigit = Z % 144;
-
-      // Locate the two NumBuild placeholders immediately preceding the jump.
-      // MtGExpandBranchPseudo and the RET_PSEUDO expander always emit them
-      // directly before the Jump, so stepping back two non-meta instructions
-      // is sufficient.
-      auto StepBackToCounted = [](MachineBasicBlock::iterator It,
-                                  MachineBasicBlock::iterator Begin)
-          -> MachineBasicBlock::iterator {
-        while (It != Begin) {
-          --It;
-          if (isCountedInstruction(*It))
-            return It;
+        if (patchPrecedingNumBuildPair(MI, MBB, Z)) {
+          ++NumPatched;
+          Changed = true;
         }
-        return Begin;
-      };
-
-      auto MBBBegin = MBB.begin();
-      auto It = MI.getIterator();
-      if (It == MBBBegin)
-        continue;
-      auto NB2It = StepBackToCounted(It, MBBBegin);
-      if (NB2It == MBBBegin || NB2It->getOpcode() != MtG::NUMBUILD)
-        continue;
-      auto NB1It = StepBackToCounted(NB2It, MBBBegin);
-      if (NB1It == NB2It || NB1It->getOpcode() != MtG::NUMBUILD)
-        continue;
-
-      NB1It->getOperand(0).setImm(HighDigit / 12);
-      NB1It->getOperand(1).setImm(HighDigit % 12);
-      NB2It->getOperand(0).setImm(LowDigit / 12);
-      NB2It->getOperand(1).setImm(LowDigit % 12);
-
-      ++NumPatched;
-      Changed = true;
+      } else if (Opc == MtG::RETURN) {
+        // Return Z' in the ret-pseudo expansion always uses Z'=0 (i.e. read
+        // from r0), so the preceding 2 NumBuilds encode the instruction
+        // count from the function entry (position 0) to this Return's
+        // position. That's exactly InstrPos[MI].
+        unsigned RetPos = InstrPos.lookup(&MI);
+        if (patchPrecedingNumBuildPair(MI, MBB, (int64_t)RetPos)) {
+          ++NumPatched;
+          Changed = true;
+        }
+      }
     }
   }
   return Changed;

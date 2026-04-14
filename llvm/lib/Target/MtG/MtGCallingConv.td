@@ -5,21 +5,26 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// This describes the calling conventions for MtG architecture.
+// MtG uses a stack-only argument passing convention.
+//
+// Rationale: MtG has no cheap base+offset addressing and every memory access
+// already expands to a byte-wise macro, so the relative cost of passing args
+// through registers versus memory is small. Keeping the ABI trivial means
+// CallingConv.td is one line per kind, and we never have to teach callers to
+// save/restore an argument-register set.
+//
+// Rules:
+//   * Every i32 argument is assigned a 4-byte stack slot, in order.
+//   * The single i32 return value goes in R8.
+//   * A call clobbers R0 (macro scratch), FLAG, and every allocatable
+//     register — equivalent to "no callee-saved registers". Caller-saved
+//     handling is expressed via CALL_PSEUDO's Defs list, not here.
 //===----------------------------------------------------------------------===//
 
-//===----------------------------------------------------------------------===//
-// MtG Return Value Calling Convention
-//===----------------------------------------------------------------------===//
 def RetCC_MtG : CallingConv<[
   CCIfType<[i32], CCAssignToReg<[R8]>>
 ]>;
 
-//===----------------------------------------------------------------------===//
-// MtG Argument Calling Conventions
-//===----------------------------------------------------------------------===//
 def CC_MtG : CallingConv<[
-  CCIfType<[i32], CCAssignToReg<[R8]>>,
-  CCIfType<[i32], CCAssignToStack<4, 4>>,
+  CCIfType<[i32], CCAssignToStack<4, 4>>
 ]>;
-

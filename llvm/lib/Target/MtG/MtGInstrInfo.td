@@ -108,13 +108,27 @@ def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, i32imm:$polarity, brtarget:$im
 def : Pat<(brcond GR:$cond, bb:$imm),
           (BRCOND_PSEUDO GR:$cond, 0, bb:$imm)>;
 
-let isCall = 1, Defs = [R0], isCodeGenOnly = 0 in {
+// Call placeholder emitted by ISel. Printed as "CallFwd $src" unconditionally;
+// the ursa assembler flips the mnemonic to "CallBwdR" when the target lies
+// before the call site and patches the two leading NumBuild placeholders that
+// MtGExpandBranchPseudo inserts with the resolved instruction distance. This
+// mirrors how ursa already resolves Jumps, and how standard targets (RISC-V,
+// MIPS, etc.) defer PC-relative resolution to the assembler / linker rather
+// than fixing it up inside the compiler backend.
+//
+// Under the stack-only ABI every allocatable register is caller-saved, so a
+// call clobbers R0 (macro scratch used for the call-distance NumBuild), FLAG,
+// and every general-purpose register. R2 (SP) and R6 (Divide quotient) are
+// reserved and therefore not listed — they are preserved by not being
+// touched, not by callee save/restore.
+let isCall = 1,
+    Defs = [R0, R1, R3, R4, R5, R7, R8, R9, R10, R11, FLAG],
+    Uses = [R0, R2],
+    isCodeGenOnly = 0 in {
   def CALL_PSEUDO : Pseudo<(outs), (ins calltarget:$src),
-                    "Call $src",[]>;
-
+                    "CallFwd $src",[]>;
 }
 
- 
 def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
           (CALL_PSEUDO tglobaladdr:$dst)>;
 

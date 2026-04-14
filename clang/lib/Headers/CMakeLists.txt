@@ -79,6 +79,10 @@ set(hexagon_files
   hvx_hexagon_protos.h
   )
 
+set(mtg_files
+  mtg.h
+  )
+
 set(hip_files
   __clang_hip_libdevice_declares.h
   __clang_hip_cmath.h
@@ -326,6 +330,7 @@ set(files
   ${hip_files}
   ${loongarch_files}
   ${mips_msa_files}
+  ${mtg_files}
   ${opencl_files}
   ${ppc_files}
   ${ppc_htm_files}
@@ -551,6 +556,7 @@ add_dependencies("clang-resource-headers"
                  "cuda-resource-headers"
                  "hexagon-resource-headers"
                  "hip-resource-headers"
+                 "mtg-resource-headers"
                  "hlsl-resource-headers"
                  "loongarch-resource-headers"
                  "mips-resource-headers"
@@ -578,6 +584,7 @@ add_header_target("aarch64-resource-headers" "${aarch64_only_files};${aarch64_on
 add_header_target("cuda-resource-headers" "${cuda_files};${cuda_wrapper_files};${cuda_wrapper_bits_files};${cuda_wrapper_utility_files}")
 add_header_target("hexagon-resource-headers" "${hexagon_files}")
 add_header_target("hip-resource-headers" "${hip_files}")
+add_header_target("mtg-resource-headers" "${mtg_files}")
 add_header_target("loongarch-resource-headers" "${loongarch_files}")
 add_header_target("mips-resource-headers" "${mips_msa_files}")
 add_header_target("ppc-resource-headers" "${ppc_files};${ppc_wrapper_files}")
@@ -707,6 +714,12 @@ install(
   DESTINATION ${header_install_dir}
   EXCLUDE_FROM_ALL
   COMPONENT hexagon-resource-headers)
+
+install(
+  FILES ${mtg_files}
+  DESTINATION ${header_install_dir}
+  EXCLUDE_FROM_ALL
+  COMPONENT mtg-resource-headers)
 
 install(
   FILES ${hip_files}
@@ -877,6 +890,9 @@ if (NOT LLVM_ENABLE_IDE)
   add_llvm_install_targets(install-hip-resource-headers
                            DEPENDS hip-resource-headers
                            COMPONENT hip-resource-headers)
+  add_llvm_install_targets(install-mtg-resource-headers
+                           DEPENDS mtg-resource-headers
+                           COMPONENT mtg-resource-headers)
   add_llvm_install_targets(install-mips-resource-headers
                            DEPENDS mips-resource-headers
                            COMPONENT mips-resource-headers)

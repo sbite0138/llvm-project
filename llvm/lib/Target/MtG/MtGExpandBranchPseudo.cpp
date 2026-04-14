@@ -1,4 +1,4 @@
-//===-- MtGExpandBranchPseudo.cpp - Expand BR_PSEUDO / BRCOND_PSEUDO ------===//
+//===-- MtGExpandBranchPseudo.cpp - Expand branch/call pseudos ------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,12 +7,19 @@
 //===----------------------------------------------------------------------===//
 //
 // The MtG ISA has separate forward/backward jump opcodes (JumpFwd, JumpBwd,
-// JumpFwdNF, JumpBwdNF, JumpFwdF, JumpBwdF). Direction must therefore be
-// baked into the opcode, and that decision depends on the final block layout.
+// JumpFwdNF, JumpBwdNF, JumpFwdF, JumpBwdF) and forward/backward call
+// opcodes (CallFwd, CallBwdR). Direction must therefore be baked into the
+// opcode, and that decision depends on the final layout.
+//
+// Jumps are intra-function, so direction can be picked here from the per-MF
+// block layout. Calls cross function boundaries — inter-function layout
+// isn't known yet, so CALL_PSEUDO is kept as-is and will be rewritten by
+// MtGCallSelector later; what this pass does for calls is insert the two
+// NumBuild placeholders that will hold the call distance (patched at the
+// same time).
 //
 // This pass runs in addPreEmitPass, after MachineBlockPlacement has finalized
-// block order, so we can correctly pick forward vs. backward opcodes when
-// expanding BR_PSEUDO and BRCOND_PSEUDO.
+// block order.
 //
 //===----------------------------------------------------------------------===//
 
@@ -95,6 +102,17 @@ bool MtGExpandBranchPseudo::expand(
     return true;
   }
 
+  if (Opc == MtG::CALL_PSEUDO) {
+    // Insert the 2 NumBuild placeholders that MtGCallSelector will later
+    // patch with the call distance. CALL_PSEUDO itself stays in place as
+    // a marker; the module pass rewrites its opcode to CallFwd / CallBwdR
+    // once inter-function layout is known.
+    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    // Note: we deliberately do NOT erase MI here.
+    return true;
+  }
+
   return false;
 }
 
@@ -110,8 +128,9 @@ bool MtGExpandBranchPseudo::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
-      if (MI.getOpcode() == MtG::BR_PSEUDO ||
-          MI.getOpcode() == MtG::BRCOND_PSEUDO) {
+      unsigned Opc = MI.getOpcode();
+      if (Opc == MtG::BR_PSEUDO || Opc == MtG::BRCOND_PSEUDO ||
+          Opc == MtG::CALL_PSEUDO) {
         Changed |= expand(MBB, MI, TII, LayoutPos);
       }
     }

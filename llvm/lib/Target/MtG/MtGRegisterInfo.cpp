@@ -164,8 +164,13 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     const auto DstReg = MI.getOperand(0).getReg();
     const auto FrameIndex = MI.getOperand(1).getIndex();
     const auto Offset = MI.getOperand(2).getImm();
-    const int64_t totalOffset =
-        MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj + Offset;
+    // SP was adjusted by StackSize + kEmergencySlotSize in the prologue,
+    // and the byte at SP+0 belongs to the emergency-spill slot. User
+    // frame slots therefore start at SP + kEmergencySlotSize, so add
+    // that to the conventional SP-relative formula.
+    const int64_t totalOffset = MFI.getObjectOffset(FrameIndex) +
+                                MFI.getStackSize() + SPAdj + Offset +
+                                MtGFrameLowering::kEmergencySlotSize;
 
     if (DstReg != getFrameRegister(MF))
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), DstReg)
@@ -186,8 +191,11 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
              MI.getOpcode() == MtG::LOADBYTEWISE_FI_MACRO) {
     const auto OpReg = MI.getOperand(0).getReg();
     const auto FrameIndex = MI.getOperand(1).getIndex();
-    const int64_t totalOffset =
-        MFI.getObjectOffset(FrameIndex) + MFI.getStackSize() + SPAdj;
+    // See ADD_MACRO_FI above: + kEmergencySlotSize compensates for the
+    // 4 extra bytes the prologue carved out at *SP for the scavenger.
+    const int64_t totalOffset = MFI.getObjectOffset(FrameIndex) +
+                                MFI.getStackSize() + SPAdj +
+                                MtGFrameLowering::kEmergencySlotSize;
 
     // We need a scratch register to compute the address (FP + offset). MtG
     // has no base+offset store, so the scratch is mandatory; the trailing

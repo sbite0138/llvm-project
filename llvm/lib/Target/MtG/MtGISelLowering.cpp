@@ -13,6 +13,7 @@
 #include "MtGISelLowering.h"
 #include "MCTargetDesc/MtGMCTargetDesc.h"
 #include "MtG.h"
+#include "MtGFrameLowering.h"
 #include "MtGMachineFunctionInfo.h"
 #include "MtGRegisterInfo.h"
 #include "MtGSubtarget.h"
@@ -289,9 +290,17 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     if (!StackPtr.getNode()) {
       StackPtr = DAG.getCopyFromReg(Chain, dl, MtG::R2, PtrVT);
     }
-    SDValue Address =
-        DAG.getNode(ISD::ADD, dl, PtrVT, StackPtr,
-                    DAG.getIntPtrConstant(VA.getLocMemOffset(), dl));
+    // Outgoing-arg slots start just above the 4-byte emergency-spill slot
+    // that MtGFrameLowering reserves at *SP; see MtGRegisterInfo's
+    // eliminateFrameIndex, which applies the same shift to all FI-relative
+    // loads/stores. Mismatching the two sides would make the callee read
+    // from a slot the caller never wrote (bug surfaced as uninitialized-
+    // memory asserts under ursa).
+    SDValue Address = DAG.getNode(
+        ISD::ADD, dl, PtrVT, StackPtr,
+        DAG.getIntPtrConstant(VA.getLocMemOffset() +
+                                  MtGFrameLowering::kEmergencySlotSize,
+                              dl));
 
     // Emit the store.
     MemOpChains.push_back(

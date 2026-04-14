@@ -93,7 +93,27 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
           .addUse(SrcReg);
   };
-  if (MI.getOpcode() == MtG::MOVEREG_MACRO) {
+  if (MI.getOpcode() == MtG::MOVEIMM_MACRO) {
+    // Expand "$dst = MOVEIMM_MACRO imm" → "NUMBUILD_MACRO imm; MOVE $dst, $r0".
+    // Mark the trailing MOVE with NoMerge so that BranchFolder's tail-merge
+    // (including the run inside MachineBlockPlacement) cannot hoist it across
+    // a BR_PSEUDO / BRCOND_PSEUDO — doing so would separate it from the
+    // NUMBUILD_MACRO that set $r0, and the branch expansion clobbers $r0 via
+    // its own NumBuild placeholders.
+    auto DstReg = MI.getOperand(0).getReg();
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(MI.getOperand(1).getImm());
+    if (DstReg != MtG::R0) {
+      auto MoveMI = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE),
+                            DstReg)
+                        .addUse(MtG::R0);
+      MoveMI->setFlag(MachineInstr::NoMerge);
+    }
+    MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildMI);
+    return true;
+  } else if (MI.getOpcode() == MtG::MOVEREG_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(1).getReg();
     BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, DstReg, SrcReg);

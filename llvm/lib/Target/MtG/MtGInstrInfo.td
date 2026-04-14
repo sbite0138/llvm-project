@@ -94,14 +94,14 @@ def NOP : CCCForm<0b000000000000,
                     }
 
 
-let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0]  in
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0] in
 def BR_PSEUDO : Pseudo<(outs), (ins brtarget:$imm),
                     "BR_PSEUDO $imm",[(br bb:$imm)]>;
 
 // $polarity: 0 = branch if $cond != 0, 1 = branch if $cond == 0.
 // Expanded in expandPostRAPseudo to FISZERO + NUMBUILD placeholders +
 // JUMPFWDNF/JUMPFWDF/JUMPBWDNF/JUMPBWDF depending on polarity and direction.
-let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0, FLAG]  in
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0, FLAG] in
 def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, i32imm:$polarity, brtarget:$imm),
                     "BRCOND_PSEUDO $cond, $polarity, $imm",[]>;
 

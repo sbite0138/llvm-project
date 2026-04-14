@@ -335,8 +335,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     expandPostRAPseudo(*RemMI);
     MI.eraseFromParent();
     return true;
-  } else if (MI.getOpcode() == MtG::MULHI_MACRO) {
-    llvm_unreachable("MULHI_MACRO not implemented yet");
   } else if (MI.getOpcode() == MtG::MULLO_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();

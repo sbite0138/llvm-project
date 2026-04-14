@@ -150,8 +150,6 @@ let Constraints = "$src1 = $dst" in {
                     "ADD_IMM_MACRO\t $dst, $src2",[(set GR:$dst, (add GR:$src1, mtgimm:$src2))]>;
     def SUB_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "SUB_MACRO\t $dst, $src2",[(set GR:$dst, (sub GR:$src1, GR:$src2))]>;
-    def MULHI_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
-                    "MULHI_MACRO\t $dst, $src2",[(set GR:$dst, (mulhs GR:$src1, GR:$src2))]>;
     def MULLO_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "MULLO_MACRO\t $dst, $src2",[(set GR:$dst, (mul GR:$src1, GR:$src2))]>;
     def DIV_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),

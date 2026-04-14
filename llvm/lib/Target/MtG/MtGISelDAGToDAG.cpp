@@ -138,12 +138,6 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
   switch (Opcode) {
   default:
     break;
-  case MtGISD::OUTPUT: {
-    SDValue Chain = Node->getOperand(0);
-    // Select the pseudo OUTPUT node into the real hardware instruction.
-    CurDAG->SelectNodeTo(Node, MtG::OUTPUT, MVT::Other, Chain);
-    return;
-  }
   case ISD::FrameIndex: {
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();
     SDValue FIVal = CurDAG->getTargetFrameIndex(FI, PtrVT); // ★非Target版

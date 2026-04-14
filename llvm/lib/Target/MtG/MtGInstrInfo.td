@@ -340,17 +340,16 @@ def LOAD : CRRForm<0b1001, (outs  GR:$val), (ins GR:$addr),
 
 
 def SDT_MtGOutput
-  : SDTypeProfile<1, 0, [ SDTCisVT<0, OtherVT> ]>;
+  : SDTypeProfile<0, 1, [SDTCisVT<0, i32>]>;
 
 def MtGISD_OUTPUT
-  : SDNode<"MtGISD::OUTPUT", SDT_MtGOutput, [SDNPHasChain]>;
+  : SDNode<"MtGISD::OUTPUT", SDT_MtGOutput,
+           [SDNPHasChain, SDNPSideEffect]>;
 
 let hasSideEffects = 1 in
-def OUTPUT : CCRForm<0b01000011, (outs ), (ins GR:$src1),
-                    "Output\t $src1",[]>{
+def OUTPUT : CCRForm<0b01000011, (outs), (ins GR:$src1),
+                    "Output\t $src1", [(MtGISD_OUTPUT GR:$src1)]> {
 }
-
-// def : Pat<(MtGISD_OUTPUT), (OUTPUT)>;
 
 
 let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {

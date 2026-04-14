@@ -201,28 +201,26 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SDLoc &dl = CLI.DL;
   SDValue Chain = CLI.Chain;
 
-  auto isPutchar = [&] {
+  // Intercept calls to the MtG "output" builtin. Programs can emit a value
+  // by declaring `declare void @__mtg_output(i32)` and calling it; we lower
+  // the call directly to the hardware Output instruction instead of a real
+  // ABI call sequence.
+  auto isMtGOutput = [&] {
     if (auto *GA = dyn_cast<GlobalAddressSDNode>(CLI.Callee))
       if (const Function *F = dyn_cast<Function>(GA->getGlobal()))
-        return F->getName() == "wrap_putchar" && F->arg_size() == 1;
+        return F->getName() == "__mtg_output" && F->arg_size() == 1;
     if (auto *ES = dyn_cast<ExternalSymbolSDNode>(CLI.Callee))
-      return StringRef(ES->getSymbol()) == "wrap_putchar";
+      return StringRef(ES->getSymbol()) == "__mtg_output";
     return false;
   }();
-  if (isPutchar) {
-    assert(CLI.OutVals.size() == 1 && "wrap_putchar expects 1 arg");
-    SDValue Arg = CLI.OutVals[0]; // 72
+  if (isMtGOutput) {
+    assert(CLI.OutVals.size() == 1 && "__mtg_output expects 1 arg");
+    SDValue Arg = CLI.OutVals[0];
     SDLoc DL = CLI.DL;
 
-    // まず R8 に値を入れる（必要ならここで即値→レジスタ化）
-    SDValue CT = DAG.getCopyToReg(Chain, DL, MtG::R8, Arg);
-    Chain = CT.getValue(0); // Glue は使わないなら読まない
-
-    // その後、オペランド無しの OUTPUT ノード（chain だけ）
-    SDValue Out =
-        DAG.getNode(MtGISD::OUTPUT, DL, DAG.getVTList(MVT::Other), {Chain});
-    Chain = Out;
-
+    // Emit MtGISD::OUTPUT with the value operand; TableGen pattern will
+    // match it to the real Output instruction.
+    Chain = DAG.getNode(MtGISD::OUTPUT, DL, MVT::Other, Chain, Arg);
     return Chain;
   }
   SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;

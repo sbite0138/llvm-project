@@ -406,14 +406,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addUse(SrcReg1);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
-  } else if (MI.getOpcode() == MtG::CALL_PSEUDO) {
-    auto Callee = MI.getOperand(0).getGlobal()->getName();
-    if (Callee == "wrap_putchar") {
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::OUTPUT)).addUse(MtG::R8);
-      MI.eraseFromParent();
-      return true;
-    }
-    return false;
   } else if (MI.getOpcode() == MtG::RET_PSEUDO) {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
         .addImm(0)

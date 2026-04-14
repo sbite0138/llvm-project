@@ -166,6 +166,127 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     expandPostRAPseudo(*RemMI);
     MI.eraseFromParent();
     return true;
+  } else if (MI.getOpcode() == MtG::ASHR_MACRO) {
+    // Arithmetic right shift: preserve the sign bit.
+    //   sign = (dst >= 2^31) ? 1 : 0   (via FLess + SetF)
+    //   mask = sign * (2^32 - 2^(32-imm))
+    //   shifted = dst / 2^imm          (unsigned, via Divide)
+    //   dst = shifted + mask
+    auto DstReg = MI.getOperand(0).getReg();
+    int64_t Imm = MI.getOperand(2).getImm();
+    std::set<Register> UseRegs = {MtG::R0, MtG::R6};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+
+    if (Imm == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+    // Shifts by 32+ in LLVM IR are UB, but if one slips through, saturating
+    // to 31 produces sign-extension semantics (0 or -1 based on sign).
+    if (Imm >= 32)
+      Imm = 31;
+
+    // Pick a scratch distinct from DstReg. R3/R4 are work registers.
+    Register SignReg = (DstReg == MtG::R3) ? MtG::R4 : MtG::R3;
+
+    // 1. FLAG = (2^31 - 1 < dst) = (dst >= 2^31) = (sign bit set)
+    auto NumBuildSignMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm((int64_t)0x7FFFFFFFLL);
+    auto FLessMI = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+                       .addUse(MtG::R0)
+                       .addUse(DstReg);
+    FLessMI->setFlag(MachineInstr::NoMerge);
+
+    // 2. SignReg = 1 if neg, 0 otherwise.
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), SignReg);
+
+    // 3. SignReg *= mask_val so it becomes the mask (or 0).
+    uint64_t MaskVal = (1ULL << 32) - (1ULL << (32 - Imm));
+    auto NumBuildMaskMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm((int64_t)MaskVal);
+    auto MultMaskMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), SignReg)
+            .addUse(SignReg)
+            .addUse(MtG::R0);
+    MultMaskMI->setFlag(MachineInstr::NoMerge);
+
+    // 4. Divide dst by 2^imm; quotient lives in R6.
+    uint64_t Divisor = 1ULL << Imm;
+    auto NumBuildDivMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm((int64_t)Divisor);
+    auto DivMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
+            .addUse(DstReg);
+    DivMI->setFlag(MachineInstr::NoMerge);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
+        .addUse(MtG::R6);
+
+    // 5. dst = LSR_result + mask.
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
+        .addUse(DstReg)
+        .addUse(SignReg);
+
+    MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildSignMI);
+    expandPostRAPseudo(*NumBuildMaskMI);
+    expandPostRAPseudo(*NumBuildDivMI);
+    return true;
+  } else if (MI.getOpcode() == MtG::SHR_MACRO) {
+    // Logical right shift: dst = dst / 2^imm (unsigned).
+    // MtG Divide puts dst/r0 into R6 and dst%r0 into dst, so we copy R6
+    // back into dst afterwards.
+    auto DstReg = MI.getOperand(0).getReg();
+    int64_t Imm = MI.getOperand(2).getImm();
+    std::set<Register> UseRegs = {MtG::R0, MtG::R6};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+
+    if (Imm == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+    if (Imm >= 32) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), DstReg);
+      MI.eraseFromParent();
+      return true;
+    }
+
+    uint64_t Divisor = 1ULL << Imm;
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(Divisor);
+    auto DivMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), DstReg)
+            .addUse(DstReg);
+    DivMI->setFlag(MachineInstr::NoMerge);
+    // Quotient lives in R6; copy it back into dst.
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE), DstReg)
+        .addUse(MtG::R6);
+    MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildMI);
+    return true;
+  } else if (MI.getOpcode() == MtG::SHL_MACRO) {
+    // "$dst = SHL_MACRO $dst, imm"  →  $dst = $dst * 2^imm (mod 2^32).
+    auto DstReg = MI.getOperand(0).getReg();
+    int64_t Imm = MI.getOperand(2).getImm();
+    std::set<Register> UseRegs = {MtG::R0};
+    assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
+
+    int64_t Factor = (Imm >= 32 || Imm < 0) ? 0 : (1LL << Imm);
+
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(Factor);
+    auto MultMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
+    MultMI->setFlag(MachineInstr::NoMerge);
+    MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildMI);
+    return true;
   } else if (MI.getOpcode() == MtG::NEG_MACRO) {
     // "$dst = NEG_MACRO $dst"  (src1 is tied to dst by the .td Constraint)
     //   →  NUMBUILD_MACRO -1   ; R0 = 2^32 - 1 = -1 (mod 2^32)

@@ -409,10 +409,17 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // (via the emergency slot) if we can't find two truly free. The
     // emergency slot is a single 4-byte location at *SP, so at most one
     // eviction is possible per expansion. For STOREBYTEWISE we need two
-    // scratches, hence a function-local function with zero free regs
-    // here is a hard failure.
-    SmallVector<Register, 2> Free, Candidates;
-    for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+    // scratches — with ~9 allocatable registers minus $val/$addr that
+    // leaves 7 candidates, so "none free" is only reachable under
+    // extreme register pressure.
+    //
+    // Using any allocatable register as scratch is sound so long as
+    // LivePhysRegs says it's available (= no live value needs to survive
+    // this pseudo); regs outside the macro's Defs list are reached only
+    // through the eviction path, never the "free" path.
+    SmallVector<Register, 4> Free, Candidates;
+    for (Register R : {MtG::R1, MtG::R3, MtG::R4, MtG::R5, MtG::R7, MtG::R8,
+                       MtG::R9, MtG::R10, MtG::R11}) {
       if (R == ValReg || R == AddrReg)
         continue;
       Candidates.push_back(R);
@@ -494,8 +501,15 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
 
+    // Scratch candidates: every allocatable register other than $val /
+    // $addr. Prefer a free one; if none are free, evict one through the
+    // emergency slot.
+    const auto Candidates = {
+        MtG::R1,  MtG::R3,  MtG::R4,  MtG::R5, MtG::R7,
+        MtG::R8,  MtG::R9,  MtG::R10, MtG::R11,
+    };
     Register IterAddrReg, Victim;
-    for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+    for (Register R : Candidates) {
       if (R == ValReg || R == AddrReg)
         continue;
       if (LivePhys.available(MRI_, R)) {
@@ -505,7 +519,7 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     if (!IterAddrReg.isValid()) {
       // Every candidate is live — evict one through the emergency slot.
-      for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+      for (Register R : Candidates) {
         if (R == ValReg || R == AddrReg)
           continue;
         IterAddrReg = R;
@@ -514,8 +528,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       }
     }
     if (!IterAddrReg.isValid())
-      report_fatal_error("MtG: LOADBYTEWISE_MACRO cannot find any scratch in "
-                         "{R3,R4,R5,R7} distinct from $val and $addr");
+      report_fatal_error("MtG: LOADBYTEWISE_MACRO cannot find any scratch "
+                         "distinct from $val and $addr");
     if (Victim.isValid())
       MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
                                          MI.getIterator(), TII, Victim);

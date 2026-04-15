@@ -116,25 +116,44 @@ def BRCOND_PSEUDO : Pseudo<(outs), (ins GR:$cond, i32imm:$polarity, brtarget:$im
 def : Pat<(brcond GR:$cond, bb:$imm),
           (BRCOND_PSEUDO GR:$cond, 0, bb:$imm)>;
 
-// Call placeholder emitted by ISel. Printed as "CallFwd $src" unconditionally;
-// the ursa assembler flips the mnemonic to "CallBwdR" when the target lies
-// before the call site and patches the two leading NumBuild placeholders that
-// MtGExpandBranchPseudo inserts with the resolved instruction distance. This
-// mirrors how ursa already resolves Jumps, and how standard targets (RISC-V,
-// MIPS, etc.) defer PC-relative resolution to the assembler / linker rather
-// than fixing it up inside the compiler backend.
+// -------- Call (X=3, Y=6) --------------------------------------------
+// Three concrete mnemonics corresponding to the spec's three Z-values:
+//   Z=0  CallFwd r0       push P=3·r0; PC += 3·r0
+//   Z=1  CallBwd r0       push P=3·r0; PC -= 3·r0     (not safe for self-recursion)
+//   Z=2  CallBwdR r0      push 2P=6·r0; PC -= 3·r0    (recursion-safe)
 //
-// Under the stack-only ABI every allocatable register is caller-saved, so a
-// call clobbers R0 (macro scratch used for the call-distance NumBuild), FLAG,
-// and every general-purpose register. R2 (SP) and R6 (Divide quotient) are
-// reserved and therefore not listed — they are preserved by not being
-// touched, not by callee save/restore.
+// The concrete instructions carry the full clobber list expected of a
+// call (every allocatable register + FLAG, plus R0 which is used to
+// load the distance). The ISel layer can't know direction yet, so it
+// emits CALL_PSEUDO below; MtGExpandBranchPseudo rewrites the pseudo
+// into CALLFWD (always, as far as LLVM is concerned) and prepends the
+// two NumBuild placeholders. ursa's fixup_jumps then flips CallFwd →
+// CallBwdR when the target is at a lower PC and fills in the NumBuild
+// pair with the resolved distance — exactly the mechanism it uses for
+// intra-function Jumps.
+//
+// R2 (SP) and R6 (Divide quotient) are reserved machine-wide and
+// therefore don't need explicit Def entries here.
 let isCall = 1,
     Defs = [R0, R1, R3, R4, R5, R7, R8, R9, R10, R11, FLAG],
-    Uses = [R0, R2],
-    isCodeGenOnly = 0 in {
+    Uses = [R0, R2] in {
+  def CALLFWD  : MtGFormCCC<3, 6, 0, (outs), (ins calltarget:$src),
+                            "CallFwd\t $src", []>;
+  def CALLBWD  : MtGFormCCC<3, 6, 1, (outs), (ins calltarget:$src),
+                            "CallBwd\t $src", []>;
+  def CALLBWDR : MtGFormCCC<3, 6, 2, (outs), (ins calltarget:$src),
+                            "CallBwdR\t $src", []>;
+}
+
+// Pseudo emitted by ISel for a call. Rewritten to CALLFWD (+ 2 leading
+// NumBuild placeholders) by MtGExpandBranchPseudo. The asm form is
+// "CALL_PSEUDO <sym>" so that any surviving pseudo in the final asm is
+// easy to spot — normal runs should never emit that string.
+let isCall = 1,
+    Defs = [R0, R1, R3, R4, R5, R7, R8, R9, R10, R11, FLAG],
+    Uses = [R0, R2] in {
   def CALL_PSEUDO : Pseudo<(outs), (ins calltarget:$src),
-                    "CallFwd $src",[]>;
+                           "CALL_PSEUDO $src", []>;
 }
 
 def : Pat<(MtGCall (i32 tglobaladdr:$dst)),

@@ -103,13 +103,19 @@ bool MtGExpandBranchPseudo::expand(
   }
 
   if (Opc == MtG::CALL_PSEUDO) {
-    // Insert the 2 NumBuild placeholders that MtGCallSelector will later
-    // patch with the call distance. CALL_PSEUDO itself stays in place as
-    // a marker; the module pass rewrites its opcode to CallFwd / CallBwdR
-    // once inter-function layout is known.
+    // Rewrite CALL_PSEUDO into the concrete CallFwd instruction preceded
+    // by two NumBuild placeholders. ursa's fixup_jumps later flips the
+    // mnemonic to CallBwdR when the callee sits at a lower PC and fills
+    // in the NumBuild pair with the resolved displacement — same pattern
+    // as intra-function Jumps. Carry over the implicit-def / use operand
+    // list from the pseudo so regalloc liveness stays correct.
     BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
     BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
-    // Note: we deliberately do NOT erase MI here.
+    auto Call = BuildMI(MBB, MI, DL, TII.get(MtG::CALLFWD))
+                    .add(MI.getOperand(0));
+    for (const MachineOperand &MO : MI.implicit_operands())
+      Call.add(MO);
+    MI.eraseFromParent();
     return true;
   }
 

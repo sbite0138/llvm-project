@@ -57,9 +57,12 @@ void MtGInstrInfo::storeRegToStackSlot(
     MachineInstr::MIFlag Flags) const {
 
   assert(SrcReg != MtG::FLAG && "Cannot store FLAG register to stack slot");
+  // MI can legitimately be MBB.end() (fast regalloc inserts spills at the
+  // end of a basic block), so pull the DebugLoc only when safe.
+  DebugLoc DL = (MI == MBB.end()) ? DebugLoc() : MI->getDebugLoc();
   // Propagate isKill so the byte-wise expansion can destroy SrcReg in place
   // when it's the last use, and only pull in a scratch register otherwise.
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_FI_MACRO))
+  BuildMI(MBB, MI, DL, get(MtG::STOREBYTEWISE_FI_MACRO))
       .addReg(SrcReg, getKillRegState(isKill))
       .addFrameIndex(FrameIdx);
 }
@@ -71,7 +74,8 @@ void MtGInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                         Register VReg, unsigned SubReg,
                                         MachineInstr::MIFlag Flags) const {
 
-  BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::LOADBYTEWISE_FI_MACRO), DestReg)
+  DebugLoc DL = (MI == MBB.end()) ? DebugLoc() : MI->getDebugLoc();
+  BuildMI(MBB, MI, DL, get(MtG::LOADBYTEWISE_FI_MACRO), DestReg)
       .addFrameIndex(FrameIdx);
 }
 
@@ -80,7 +84,11 @@ void MtGInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                const DebugLoc &DL, Register DestReg,
                                Register SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
-  assert(DestReg != SrcReg && "Cannot copy to FLAG register");
+  // MtG's Move requires rY != rZ (the Y==Z encoding means Zero, not Move).
+  // Elide self-copies so ISel / regalloc can call copyPhysReg uniformly
+  // without having to filter them.
+  if (DestReg == SrcReg)
+    return;
   BuildMI(MBB, I, DL, get(MtG::MOVE), DestReg)
       .addUse(SrcReg, getKillRegState(KillSrc));
 }

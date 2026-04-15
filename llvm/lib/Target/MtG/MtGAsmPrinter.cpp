@@ -151,6 +151,16 @@ void MtGAsmPrinter::emitInstruction(const MachineInstr *MI) {
   MtG_MC::verifyInstructionPredicates(MI->getOpcode(),
                                       getSubtargetInfo().getFeatureBits());
 
+  // MtG's Move (X=5, Y, Z with Y!=Z) is not a valid encoding when Y==Z —
+  // the MtG ISA reuses (5, Y, Y) as Zero rY = 0. Fast regalloc sometimes
+  // leaves behind self-copies (COPY $rN, $rN) that later pipeline passes
+  // lower to MOVE without going through copyPhysReg. Skip them here so
+  // they don't produce an invalid "Move rN, rN" in the output asm.
+  if (MI->getOpcode() == MtG::MOVE && MI->getNumOperands() >= 2 &&
+      MI->getOperand(0).isReg() && MI->getOperand(1).isReg() &&
+      MI->getOperand(0).getReg() == MI->getOperand(1).getReg())
+    return;
+
   MtGMCInstLower MCInstLowering(OutContext, *this);
 
   MCInst TmpInst;

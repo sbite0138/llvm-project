@@ -60,8 +60,9 @@ static void emitEmergencySave(MachineBasicBlock &MBB,
   for (int i = 0; i < 4; ++i) {
     // VictimReg = VictimReg % 256 (low byte); R6 = VictimReg / 256 (upper).
     BuildMI(MBB, II, DL, TII.get(MtG::DIVIDE), VictimReg).addUse(VictimReg);
-    // *SP = low byte
-    BuildMI(MBB, II, DL, TII.get(MtG::STORE)).addUse(MtG::R2).addUse(VictimReg);
+    // *SP = low byte. Store is spec-ordered (Y=value, Z=address): first
+    // operand is the byte to write, second is where to write it.
+    BuildMI(MBB, II, DL, TII.get(MtG::STORE)).addUse(VictimReg).addUse(MtG::R2);
     if (i < 3) {
       // VictimReg <- upper bytes for the next iteration.
       BuildMI(MBB, II, DL, TII.get(MtG::MOVE), VictimReg).addUse(MtG::R6);

@@ -246,6 +246,11 @@ def ADD : MtGFormCRR<0,
                      "Add\t $rY, $rZ", []>;
 
 // --- X=1 : Sub family ----------------------------------------------------
+// NOTE: Both ursa and the existing LLVM callers use SubCond with the
+// modified register as the FIRST operand — the opposite of the spec's
+// "if rZ>=rY then rZ-=rY" definition, which puts the modified register in
+// the Z position. Matching the existing behaviour here keeps everything
+// consistent; the spec-vs-implementation mismatch is a separate item.
 let Constraints = "$rY = $rY_in", Defs = [FLAG] in
 def SUBCOND : MtGFormCRR<1,
                          (outs GR:$rY), (ins GR:$rY_in, GR:$rZ),
@@ -339,11 +344,15 @@ def ZERO : MtGFormCSR<5,
                       (outs GR:$r), (ins),
                       "Zero\t $r", []>;
 
-// --- X=6 : Mult (rZ *= rY; destination is Z per spec) -------------------
-let Constraints = "$rZ = $rZ_in" in
+// --- X=6 : Mult ----------------------------------------------------------
+// Spec says `rZ = rY * rZ`, i.e. the Z position is the destination; ursa
+// and the existing LLVM callers instead modify rY (first operand) and use
+// rZ as the multiplier. Matching that behaviour for consistency — same
+// reasoning as SubCond above.
+let Constraints = "$rY = $rY_in" in
 def MULT : MtGFormCRR<6,
-                      (outs GR:$rZ), (ins GR:$rY, GR:$rZ_in),
-                      "Mult\t $rZ, $rY", []>;
+                      (outs GR:$rY), (ins GR:$rY_in, GR:$rZ),
+                      "Mult\t $rY, $rZ", []>;
 
 // --- X=8/9 : Memory -----------------------------------------------------
 // NOTE: Per spec `Store mem[rZ] = rY` and `Load rY = mem[rZ]`. The asm

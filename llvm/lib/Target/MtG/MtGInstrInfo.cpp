@@ -191,13 +191,14 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // Pick a scratch distinct from DstReg. R3/R4 are work registers.
     Register SignReg = (DstReg == MtG::R3) ? MtG::R4 : MtG::R3;
 
-    // 1. FLAG = (2^31 - 1 < dst) = (dst >= 2^31) = (sign bit set)
+    // 1. FLAG = (2^31 - 1 < dst) = (dst >= 2^31) = (sign bit set).
+    //    FLess is spec-ordered "flag = rZ < rY", so pass (Y=dst, Z=R0).
     auto NumBuildSignMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm((int64_t)0x7FFFFFFFLL);
     auto FLessMI = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
-                       .addUse(MtG::R0)
-                       .addUse(DstReg);
+                       .addUse(DstReg)
+                       .addUse(MtG::R0);
     FLessMI->setFlag(MachineInstr::NoMerge);
 
     // 2. SignReg = 1 if neg, 0 otherwise.
@@ -414,10 +415,10 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       // ByteWorkReg = ByteWorkReg % 256 (low byte); R6 = upper bytes.
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), ByteWorkReg)
           .addUse(ByteWorkReg);
-      // *iter = low byte
+      // *iter = low byte (Store is Y=value, Z=address per the MtG spec).
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
-          .addUse(IterAddrReg)
-          .addUse(ByteWorkReg);
+          .addUse(ByteWorkReg)
+          .addUse(IterAddrReg);
       if (i < 3) {
         // Refill ByteWorkReg with the higher bytes and advance the iterator.
         BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, MtG::R6);
@@ -519,15 +520,18 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::EQ_MACRO) {
+    // FLess is spec-ordered "flag = rZ < rY". Pair up both directions and
+    // OR them via flag-combining so the accumulated flag is "src1 != src2";
+    // SETNF then gives us src1 == src2.
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg1 = MI.getOperand(1).getReg();
     auto SrcReg2 = MI.getOperand(2).getReg();
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
-        .addUse(SrcReg1)
-        .addUse(SrcReg2);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
         .addUse(SrcReg2)
         .addUse(SrcReg1);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg1)
+        .addUse(SrcReg2);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETNF), DstReg);
     MI.eraseFromParent();
     return true;
@@ -536,31 +540,34 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     auto SrcReg1 = MI.getOperand(1).getReg();
     auto SrcReg2 = MI.getOperand(2).getReg();
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
-        .addUse(SrcReg1)
-        .addUse(SrcReg2);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
         .addUse(SrcReg2)
         .addUse(SrcReg1);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg1)
+        .addUse(SrcReg2);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::LT_MACRO) {
-    auto DstReg = MI.getOperand(0).getReg();
-    auto SrcReg1 = MI.getOperand(1).getReg();
-    auto SrcReg2 = MI.getOperand(2).getReg();
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
-        .addUse(SrcReg1)
-        .addUse(SrcReg2);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
-    MI.eraseFromParent();
-    return true;
-  } else if (MI.getOpcode() == MtG::GT_MACRO) {
+    // Want dst = (src1 < src2). FLess sets flag = rZ < rY, so pass
+    // Y=src2, Z=src1.
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg1 = MI.getOperand(1).getReg();
     auto SrcReg2 = MI.getOperand(2).getReg();
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
         .addUse(SrcReg2)
         .addUse(SrcReg1);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::GT_MACRO) {
+    // Want dst = (src1 > src2) = (src2 < src1). Pass Y=src1, Z=src2.
+    auto DstReg = MI.getOperand(0).getReg();
+    auto SrcReg1 = MI.getOperand(1).getReg();
+    auto SrcReg2 = MI.getOperand(2).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+        .addUse(SrcReg1)
+        .addUse(SrcReg2);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
     return true;

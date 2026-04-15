@@ -66,6 +66,32 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SELECT, MVT::i32, Legal);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+
+  // Sub-word loads and truncating stores — needed for `char` / `short`
+  // struct fields and any byte-level memory traffic. MtG's memory model
+  // stores a full value into each addressed cell, so:
+  //   - truncstore i8/i16 → plain Store of the low-byte/low-halfword
+  //     (the callers mask if needed; for constants clang already masks).
+  //   - zextload / "any" extload i8/i16 → plain Load; the cell already
+  //     holds the byte value in [0, 2^N) range.
+  //   - sextload i8/i16 → expand via `(x << (32-N)) >>s (32-N)` so the
+  //     existing SHL_MACRO / ASHR_MACRO sign-fill the top bits.
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i8, Expand);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Expand);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i8, Legal);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Legal);
+  setLoadExtAction(ISD::EXTLOAD, MVT::i32, MVT::i8, Legal);
+  setLoadExtAction(ISD::EXTLOAD, MVT::i32, MVT::i16, Legal);
+  setTruncStoreAction(MVT::i32, MVT::i8, Legal);
+  setTruncStoreAction(MVT::i32, MVT::i16, Legal);
+
+  // No direct `sign_extend_inreg` op — expand to `(x << N) >>s N` where N
+  // is (32 - sub-word width). The existing SHL_MACRO / ASHR_MACRO handle
+  // both sides. This is what the generic expander does anyway; mark it
+  // explicitly so the legalizer doesn't fall through to "can't select".
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 EVT MtGTargetLowering::getSetCCResultType(const DataLayout &DL,
@@ -878,16 +904,25 @@ SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
                                               SelectionDAG &DAG) const {
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
   int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
-  assert(Offset == 0 && "non-zero global address offset not supported");
   // MtG uses 32-bit pointers (see MtGTargetMachine::computeDataLayout).
   // Materialise the global's address into a register via MOVEADDR_MACRO;
   // the post-RA expansion lowers it to "NumBuildAddr <sym>; Move $dst, r0",
   // and ursa fills in the actual base-144 digits at assemble time once it
   // knows where the symbol lives in memory.
+  //
+  // Clang emits non-zero Offsets when a field/element of a global is
+  // addressed (e.g. `&global_struct.field` becomes `&global_struct + 4`).
+  // NumBuildAddr is a symbol-only resolver, so fold the offset in by
+  // materialising the base address first and adding the constant on top.
+  SDLoc DL(Op);
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
-  SDValue TGA = DAG.getTargetGlobalAddress(GV, SDLoc(Op), PtrVT, 0);
-  return SDValue(
-      DAG.getMachineNode(MtG::MOVEADDR_MACRO, SDLoc(Op), PtrVT, TGA), 0);
+  SDValue TGA = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0);
+  SDValue Base =
+      SDValue(DAG.getMachineNode(MtG::MOVEADDR_MACRO, DL, PtrVT, TGA), 0);
+  if (Offset == 0)
+    return Base;
+  return DAG.getNode(ISD::ADD, DL, PtrVT, Base,
+                     DAG.getConstant(Offset, DL, PtrVT));
 }
 
 bool MtGTargetLowering::isLegalAddressingMode(const DataLayout &DL,

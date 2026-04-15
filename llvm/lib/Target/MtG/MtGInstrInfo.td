@@ -405,6 +405,19 @@ def LOAD : MtGFormCRR<9,
                       (outs GR:$rY), (ins GR:$rZ),
                       "Load\t $rY, $rZ", []>;
 
+// Sub-word memory traffic. MtG's Load / Store move a whole simulator
+// memory cell (any integer); we use them for i8 / i16 access so that
+// `char` / `short` fields cost one cell instead of four. The callers
+// are responsible for keeping the stored value in range — clang emits
+// the masking implicitly for the cases we care about (e.g. assigning
+// a constant char field, reading an unsigned char into an int).
+def : Pat<(truncstorei8  GR:$val, GR:$addr), (STORE GR:$val, GR:$addr)>;
+def : Pat<(truncstorei16 GR:$val, GR:$addr), (STORE GR:$val, GR:$addr)>;
+def : Pat<(i32 (zextloadi8  GR:$addr)), (LOAD GR:$addr)>;
+def : Pat<(i32 (zextloadi16 GR:$addr)), (LOAD GR:$addr)>;
+def : Pat<(i32 (extloadi8   GR:$addr)), (LOAD GR:$addr)>;
+def : Pat<(i32 (extloadi16  GR:$addr)), (LOAD GR:$addr)>;
+
 // --- X=10 : NumBuild ----------------------------------------------------
 let Defs = [R0] in
 def NUMBUILD : MtGFormCII<10,

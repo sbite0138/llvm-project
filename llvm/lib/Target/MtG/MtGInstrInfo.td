@@ -379,7 +379,11 @@ def INPUTB : CRCForm<0b00100001, (outs GR:$dst), (ins),
 }
 
 
-let isReturn = 1, isTerminator = 1, hasDelaySlot=0, isBarrier=1, hasCtrlDep=1 in {
-  def RETURN  : Pseudo<(outs), (ins), "Return",  []> {
-  }
+// Emitted with an explicit `r0` operand so the asm shows the same form the
+// hardware sees: Return's Z' field is 0 (meaning "read r0 as the offset"),
+// with the two preceding NumBuild placeholders filling r0 with the
+// entry-to-this-Return instruction count (patched by MtGBranchSelector).
+let isReturn = 1, isTerminator = 1, hasDelaySlot = 0, isBarrier = 1,
+    hasCtrlDep = 1, Uses = [R0] in {
+  def RETURN : Pseudo<(outs), (ins), "Return\t r0", []>;
 }

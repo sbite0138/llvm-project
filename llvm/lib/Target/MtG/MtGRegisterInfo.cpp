@@ -40,6 +40,26 @@ using namespace llvm;
 // FIXME: Provide proper call frame setup / destroy opcodes.
 MtGRegisterInfo::MtGRegisterInfo() : MtGGenRegisterInfo(0) {}
 
+// ADD_MACRO's .td declaration lists implicit-defs of R0-R7 to cover the
+// worst case, but its actual post-expansion form (ADD + NUMBUILD_MACRO +
+// REM_MACRO) only clobbers R0 (NUMBUILD_MACRO) and R6 (DIVIDE via
+// REM_MACRO). When we emit ADD_MACRO as part of FI elimination, leaving
+// the over-broad implicit-defs on the MI confuses the LivePhys walk that
+// the next FI-elimination step performs: registers like $r1 appear dead
+// at the spill site even though they're still used later in the MBB.
+// Strip the inaccurate bits so liveness stays faithful.
+static void narrowAddMacroClobbers(MachineInstr &MI) {
+  static const MCPhysReg Spurious[] = {MtG::R1, MtG::R3, MtG::R4,
+                                       MtG::R5, MtG::R7};
+  for (MCPhysReg R : Spurious) {
+    int Idx = MI.findRegisterDefOperandIdx(R, /*TRI=*/nullptr,
+                                           /*isDead=*/false,
+                                           /*Overlap=*/false);
+    if (Idx >= 0 && MI.getOperand(Idx).isImplicit())
+      MI.removeOperand(Idx);
+  }
+}
+
 // Emit a byte-wise save of $VictimReg into the emergency-spill slot at *SP
 // (the 4 extra bytes reserved by MtGFrameLowering::emitPrologue). The
 // expansion deliberately uses no scratch register beyond what the MtG ISA
@@ -209,9 +229,20 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     if (!MI.isDebugValue() && !isInt<16>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
     }
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), DstReg)
+    // ADD_MACRO handles the 32-bit wrap via its REM expansion — needed when
+    // totalOffset is negative (e.g. frame-index slots below SP). The pseudo's
+    // Defs = [R0..R7] declaration is overly conservative, though: the real
+    // post-expansion clobbers are just R0 (NUMBUILD_MACRO) and R6 (DIVIDE via
+    // REM_MACRO). Strip the spurious R1/R3/R4/R5/R7 implicit-defs after
+    // BuildMI so LivePhys doesn't think other live values die here when we
+    // process the next spill in the same MBB.
+    {
+      auto AddMI = BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), DstReg)
                        .addReg(DstReg)
-                       .addReg(MtG::R0));
+                       .addReg(MtG::R0);
+      narrowAddMacroClobbers(*AddMI.getInstr());
+      MBB.insert(II, AddMI);
+    }
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO ||
@@ -240,8 +271,9 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       LivePhys.stepBackward(*It);
     }
 
-    static const Register Candidates[] = {MtG::R3, MtG::R4, MtG::R5, MtG::R7,
-                                          MtG::R8, MtG::R9, MtG::R10, MtG::R11};
+    static const Register Candidates[] = {MtG::R1, MtG::R3, MtG::R4, MtG::R5,
+                                          MtG::R7, MtG::R8, MtG::R9, MtG::R10,
+                                          MtG::R11};
     Register TmpReg;
     for (Register R : Candidates) {
       if (R == OpReg)
@@ -278,9 +310,13 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     MBB.insert(
         II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
 
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), TmpReg)
+    {
+      auto AddMI = BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), TmpReg)
                        .addReg(TmpReg)
-                       .addReg(MtG::R0));
+                       .addReg(MtG::R0);
+      narrowAddMacroClobbers(*AddMI.getInstr());
+      MBB.insert(II, AddMI);
+    }
 
     if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
       // Carry over $val's kill flag so STOREBYTEWISE_MACRO's expansion

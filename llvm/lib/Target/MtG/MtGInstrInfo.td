@@ -166,9 +166,15 @@ def NUMBUILD_MACRO : Pseudo<(outs ), (ins  mtgimm:$imm),
                     "NUMBUILD_MACRO\t $imm",[]>;
 def tFI : Operand<i32>;
 
-let usesCustomInserter = 1, Defs = [R0, R1, R2, R3, R4, R5, R6, R7] in {
-
-let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in 
+// LOAD/STOREBYTEWISE and MOVEREG are atomic in the simulator — they don't
+// clobber R1-R7. Keep them OUT of the broad Defs block below so RegAllocFast
+// (and the PEI liveness analysis) won't assume values in R1/R3/R4/R5/R7
+// die across a spill/reload. We keep R0 in their Defs because some
+// downstream code (notably the CALL_PSEUDO->CallFwd expansion which uses
+// R0 as the call-distance register) depends on a def-between-builds
+// barrier for liveness-through-calls analysis.
+let Defs = [R0] in {
+let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in
 def LOADBYTEWISE_MACRO : Pseudo<(outs GR:$val), (ins  GR:$addr),
                     "LOADBYTEWISE_MACRO\t $val, $addr",[(set GR:$val, (load GR:$addr))]>;
 
@@ -177,11 +183,15 @@ def STOREBYTEWISE_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
                     "STOREBYTEWISE_MACRO\t $val, $addr",[(store GR:$val, GR:$addr)]>;
 
 def LOADBYTEWISE_IMM_MACRO : Pseudo<(outs GR:$val), (ins mtgimm:$imm),
-                    "LOADBYTEWISE_IMM_MACRO\t $val, $imm",[]>; 
+                    "LOADBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
 def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, mtgimm:$imm),
                     "STOREBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
+}
+
 def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                 "MOVREG_MACRO\t $dst, $src1",[]>;
+
+let usesCustomInserter = 1, Defs = [R0, R1, R2, R3, R4, R5, R6, R7] in {
 def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
                   "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
 // Materialise the address of a global symbol into a register. Expanded by

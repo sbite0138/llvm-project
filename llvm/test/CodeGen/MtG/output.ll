@@ -18,11 +18,12 @@ define void @emit_const() nounwind {
   ret void
 }
 
-; The value argument is honored (it ends up in R8 per the MtG calling
-; convention regardless of the original register).
+; The value argument is honored. It reaches the Output instruction in
+; whichever allocatable register RegAllocFast happens to pick for the
+; byte-wise load destination — the exact register is not contractual.
 define void @emit_var(i32 %v) nounwind {
 ; CHECK-LABEL: emit_var:
-; CHECK: Output	 r8
+; CHECK: Output	 r{{[0-9]+}}
 ; CHECK-NOT: Call $__mtg_output
 ; CHECK: Return
   call void @__mtg_output(i32 %v)

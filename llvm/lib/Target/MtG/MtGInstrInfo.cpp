@@ -126,6 +126,22 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     expandPostRAPseudo(*NumBuildMI);
     return true;
+  } else if (MI.getOpcode() == MtG::MOVEADDR_MACRO) {
+    // "$dst = MOVEADDR_MACRO @sym" → "NumBuildAddr @sym; Move $dst, r0".
+    // The NumBuildAddr placeholder is a meta-instruction that ursa's
+    // fixup_jumps replaces with the 4 base-144 NumBuild digit pairs of
+    // the symbol's resolved address.
+    auto DstReg = MI.getOperand(0).getReg();
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILDADDR))
+        .add(MI.getOperand(1));
+    if (DstReg != MtG::R0) {
+      auto MoveMI = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MOVE),
+                            DstReg)
+                        .addUse(MtG::R0);
+      MoveMI->setFlag(MachineInstr::NoMerge);
+    }
+    MI.eraseFromParent();
+    return true;
   } else if (MI.getOpcode() == MtG::MOVEREG_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(1).getReg();

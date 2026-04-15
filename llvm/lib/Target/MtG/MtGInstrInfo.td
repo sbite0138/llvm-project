@@ -184,6 +184,13 @@ def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                 "MOVREG_MACRO\t $dst, $src1",[]>;
 def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
                   "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
+// Materialise the address of a global symbol into a register. Expanded by
+// expandPostRAPseudo into "NumBuildAddr <sym>; Move $dst, r0", where
+// NumBuildAddr is a meta-instruction the ursa assembler resolves by
+// looking up the symbol's allocated address and emitting the
+// corresponding 4 NumBuild digit pairs.
+def MOVEADDR_MACRO : Pseudo<(outs GR:$dst), (ins calltarget:$sym),
+                    "MOVEADDR_MACRO\t $dst, $sym",[]>;
 let Constraints = "$src1 = $dst" in {
     def ADD_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "ADD_MACRO\t $dst, $src2",[(set GR:$dst, (add GR:$src1, GR:$src2))]>;
@@ -393,6 +400,16 @@ let Defs = [R0] in
 def NUMBUILD : MtGFormCII<10,
                           (outs), (ins cardimm:$yimm, cardimm:$zimm),
                           "NumBuild\t $yimm, $zimm", []>;
+
+// Pseudo "load global-symbol address into r0" — emitted by the
+// MOVEADDR_MACRO expansion. ursa replaces each `NumBuildAddr <sym>` with
+// 4 ordinary NumBuild digit pairs whose values are the base-144 digits
+// of the symbol's runtime address, mirroring how it already resolves
+// PC-relative Jump / Call distances. From LLVM's POV it's a Pseudo
+// (no real encoding); the asm output is the only thing that matters.
+let Defs = [R0] in
+def NUMBUILDADDR : Pseudo<(outs), (ins calltarget:$sym),
+                          "NumBuildAddr\t $sym", []>;
 
 // --- X=11 : Flag-setting compare ----------------------------------------
 let Defs = [FLAG] in {

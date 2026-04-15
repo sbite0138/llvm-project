@@ -877,16 +877,17 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
 SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
                                               SelectionDAG &DAG) const {
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
-
   int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
-  assert(Offset == 0 && "Offset must be zero for MtG");
-
-  SDValue Addr = DAG.getTargetGlobalAddress(GV, SDLoc(Op), MVT::iPTR, 0);
-
-  // Create the TargetGlobalAddress node, folding in the constant offset.
-  // SDValue Result = DAG.getTargetGlobalAddress(GV, SDLoc(Op), PtrVT,
-  // Offset);
-  return DAG.getNode(MtGISD::WRAP_ADDR, SDLoc(Op), MVT::iPTR, Addr, Addr);
+  assert(Offset == 0 && "non-zero global address offset not supported");
+  // MtG uses 32-bit pointers (see MtGTargetMachine::computeDataLayout).
+  // Materialise the global's address into a register via MOVEADDR_MACRO;
+  // the post-RA expansion lowers it to "NumBuildAddr <sym>; Move $dst, r0",
+  // and ursa fills in the actual base-144 digits at assemble time once it
+  // knows where the symbol lives in memory.
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+  SDValue TGA = DAG.getTargetGlobalAddress(GV, SDLoc(Op), PtrVT, 0);
+  return SDValue(
+      DAG.getMachineNode(MtG::MOVEADDR_MACRO, SDLoc(Op), PtrVT, TGA), 0);
 }
 
 bool MtGTargetLowering::isLegalAddressingMode(const DataLayout &DL,

@@ -283,8 +283,11 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                        .addReg(MtG::R0));
 
     if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
+      // Carry over $val's kill flag so STOREBYTEWISE_MACRO's expansion
+      // can use it in place when it's the last read.
+      bool ValKilled = MI.getOperand(0).isKill();
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STOREBYTEWISE_MACRO))
-                         .addUse(OpReg)
+                         .addReg(OpReg, getKillRegState(ValKilled))
                          .addUse(TmpReg));
     } else {
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)

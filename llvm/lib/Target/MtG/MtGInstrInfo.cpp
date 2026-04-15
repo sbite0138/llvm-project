@@ -57,8 +57,10 @@ void MtGInstrInfo::storeRegToStackSlot(
     MachineInstr::MIFlag Flags) const {
 
   assert(SrcReg != MtG::FLAG && "Cannot store FLAG register to stack slot");
+  // Propagate isKill so the byte-wise expansion can destroy SrcReg in place
+  // when it's the last use, and only pull in a scratch register otherwise.
   BuildMI(MBB, MI, MI->getDebugLoc(), get(MtG::STOREBYTEWISE_FI_MACRO))
-      .addUse(SrcReg)
+      .addReg(SrcReg, getKillRegState(isKill))
       .addFrameIndex(FrameIdx);
 }
 
@@ -378,22 +380,31 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_MACRO) {
-    // Split a 32-bit value byte-wise into 4 consecutive memory cells starting
-    // at $addr. $val is copied into ByteWorkReg and progressively divided by
-    // 256; the low byte (remainder) is stored each iteration and the upper
-    // part (quotient) is fetched back from R6. The address lives in a
-    // separate IterAddrReg so we don't corrupt the caller's $addr.
+    // Split a 32-bit value byte-wise into 4 consecutive memory cells
+    // starting at $addr. The value is progressively divided by 256, the
+    // low byte (remainder) is stored each iteration, and the upper part
+    // (quotient) comes back in R6. Address iteration is destructive —
+    // ADD1 on IterAddrReg — so whichever register we use as IterAddrReg
+    // loses its incoming value.
     //
-    // Scratches come from {R3, R4, R5, R7}; we must avoid $val, $addr, AND
-    // any register that's still live at this MI — RegAllocFast sometimes
-    // leaves values live across pseudos whose Defs list should have forced
-    // a spill, so we do our own liveness-aware pick rather than trusting
-    // the blanket Defs. If fewer than 2 free candidates are available we
-    // evict live ones through the emergency-spill slot and reload them
-    // after the expansion.
+    // We can destroy $val in place (reuse it as ByteWorkReg) if $val is
+    // marked killed (no one reads it after this MI). Same for $addr as
+    // IterAddrReg. That lets us reduce the scratch count from 2 to as
+    // few as 0 depending on how many operands are dying.
+    //
+    // Any allocatable register outside {$val, $addr} is a valid scratch
+    // as long as LivePhysRegs says it's available. Non-free candidates
+    // can be evicted through the single 4-byte emergency-spill slot at
+    // *SP; we can evict at most one such register per expansion.
+    //
+    // With the FP-trick at hand, the worst remaining case is "both $val
+    // and $addr live-after AND zero of ~9 allocatable registers free",
+    // which is practically unreachable.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
     assert(ValReg != AddrReg && "STOREBYTEWISE expects distinct val and addr");
+    const bool ValKilled = MI.getOperand(0).isKill();
+    const bool AddrKilled = MI.getOperand(1).isKill();
 
     const auto &MBB_ = *MI.getParent();
     LivePhysRegs LivePhys(*MBB_.getParent()->getSubtarget().getRegisterInfo());
@@ -405,18 +416,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
 
-    // Collect free candidates first; fall back to one evicted live reg
-    // (via the emergency slot) if we can't find two truly free. The
-    // emergency slot is a single 4-byte location at *SP, so at most one
-    // eviction is possible per expansion. For STOREBYTEWISE we need two
-    // scratches — with ~9 allocatable registers minus $val/$addr that
-    // leaves 7 candidates, so "none free" is only reachable under
-    // extreme register pressure.
-    //
-    // Using any allocatable register as scratch is sound so long as
-    // LivePhysRegs says it's available (= no live value needs to survive
-    // this pseudo); regs outside the macro's Defs list are reached only
-    // through the eviction path, never the "free" path.
     SmallVector<Register, 4> Free, Candidates;
     for (Register R : {MtG::R1, MtG::R3, MtG::R4, MtG::R5, MtG::R7, MtG::R8,
                        MtG::R9, MtG::R10, MtG::R11}) {
@@ -426,29 +425,50 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       if (LivePhys.available(MRI_, R))
         Free.push_back(R);
     }
+
+    unsigned NumScratchesNeeded =
+        (ValKilled ? 0u : 1u) + (AddrKilled ? 0u : 1u);
     Register IterAddrReg, ByteWorkReg, Victim;
-    if (Free.size() >= 2) {
-      IterAddrReg = Free[0];
-      ByteWorkReg = Free[1];
-    } else if (Free.size() == 1 && Candidates.size() >= 2) {
-      IterAddrReg = Free[0];
-      for (Register R : Candidates)
-        if (R != IterAddrReg) {
-          ByteWorkReg = R;
-          Victim = R;
-          break;
-        }
+
+    auto pickOne = [&](unsigned Idx) -> Register {
+      // Prefer free regs, fall back to eviction for Idx == last needed.
+      if (Idx < Free.size())
+        return Free[Idx];
+      if (Candidates.size() > Free.size())
+        return Candidates[Free.size()]; // first non-free
+      return Register();
+    };
+
+    if (Free.size() >= NumScratchesNeeded) {
+      unsigned Next = 0;
+      if (!AddrKilled) IterAddrReg = pickOne(Next++);
+      if (!ValKilled)  ByteWorkReg = pickOne(Next++);
+    } else if (Free.size() + 1 >= NumScratchesNeeded &&
+               Candidates.size() >= NumScratchesNeeded) {
+      // Evict exactly one candidate; that register becomes the Victim.
+      unsigned Next = 0;
+      if (!AddrKilled) IterAddrReg = pickOne(Next++);
+      if (!ValKilled)  ByteWorkReg = pickOne(Next++);
+      // The last pickOne() will have returned the Victim (first non-free).
+      Victim = Next == 2 ? ByteWorkReg : IterAddrReg;
+      assert(Victim.isValid() && !LivePhys.available(MRI_, Victim));
     } else {
-      report_fatal_error("MtG: STOREBYTEWISE_MACRO needs 2 scratches but 0 "
-                         "of {R3,R4,R5,R7} are free — emergency slot only "
-                         "holds one 32-bit value, cannot evict two");
+      report_fatal_error("MtG: STOREBYTEWISE_MACRO cannot satisfy its "
+                         "scratch-register needs; no free allocatable "
+                         "register is available and we can only evict one "
+                         "through the emergency slot");
     }
+    if (ValKilled)  ByteWorkReg = ValReg;  // in-place destruction
+    if (AddrKilled) IterAddrReg = AddrReg;
+
     if (Victim.isValid())
       MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
                                          MI.getIterator(), TII, Victim);
 
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
-    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, ValReg);
+    if (!AddrKilled)
+      BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
+    if (!ValKilled)
+      BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, ValReg);
 
     auto NumBuildMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))

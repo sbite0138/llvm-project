@@ -15,14 +15,18 @@
 //
 // Rules:
 //   * Every i32 argument is assigned a 4-byte stack slot, in order.
-//   * The single i32 return value goes in R8.
+//   * Larger-than-i32 types (i64, etc.) are legalised into 32-bit pieces
+//     upstream; each piece then follows the i32 rule. For arguments this
+//     happens automatically at stack-slot assignment.
+//   * The i32 return value goes in R8. i64 returns are split into a
+//     (low, high) pair in (R8, R9).
 //   * A call clobbers R0 (macro scratch), FLAG, and every allocatable
 //     register — equivalent to "no callee-saved registers". Caller-saved
 //     handling is expressed via CALL_PSEUDO's Defs list, not here.
 //===----------------------------------------------------------------------===//
 
 def RetCC_MtG : CallingConv<[
-  CCIfType<[i32], CCAssignToReg<[R8]>>
+  CCIfType<[i32], CCAssignToReg<[R8, R9]>>
 ]>;
 
 def CC_MtG : CallingConv<[

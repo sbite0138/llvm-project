@@ -631,8 +631,15 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
 
     BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), BitInit)
         .addImm((int64_t)(1LL << 31));
-    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVE), AInit).addUse(Src1Reg);
-    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVE), BInit).addUse(Src2Reg);
+    // Use TargetOpcode::COPY here so the eventual physreg move goes
+    // through copyPhysReg (which elides same-reg cases). Emitting
+    // MtG::MOVE directly would become "Move rN, rN" if coalescing
+    // assigns source and destination to the same physreg, and MtG's
+    // Move encoding forbids rY == rZ.
+    BuildMI(*EntryMBB, MI, DL, TII.get(TargetOpcode::COPY), AInit)
+        .addReg(Src1Reg);
+    BuildMI(*EntryMBB, MI, DL, TII.get(TargetOpcode::COPY), BInit)
+        .addReg(Src2Reg);
     BuildMI(*EntryMBB, MI, DL, TII.get(MtG::ZERO), ResultInit);
 
     // ---- Loop body vregs. ----
@@ -711,9 +718,10 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     BuildMI(LoopMBB, DL, TII.get(MtG::BRCOND_PSEUDO))
         .addReg(Cond).addImm(0).addMBB(LoopMBB);
 
-    // ExitMBB: dst = final result.
-    BuildMI(*ExitMBB, ExitMBB->begin(), DL, TII.get(MtG::MOVE), DstReg)
-        .addUse(ResultNew);
+    // ExitMBB: dst = final result. Same reasoning as above — prefer COPY
+    // over a direct MtG::MOVE so self-copies are elided by copyPhysReg.
+    BuildMI(*ExitMBB, ExitMBB->begin(), DL, TII.get(TargetOpcode::COPY), DstReg)
+        .addReg(ResultNew);
 
     MI.eraseFromParent();
     // Continue inserting subsequent ISel output into ExitMBB rather than the

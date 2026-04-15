@@ -157,8 +157,14 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
     if (FIN && CN) {
       int FI = FIN->getIndex();
       int64_t ofs = CN->getSExtValue();
-      SDValue FIVal = CurDAG->getFrameIndex(FI, PtrVT);        // ★
-      SDValue Ofs = CurDAG->getTargetConstant(ofs, dl, PtrVT); // ★
+      // Use getTargetFrameIndex so the operand survives as a real
+      // FrameIndex MachineOperand through to eliminateFrameIndex.
+      // With the non-target form, MI emission materialised the FI via a
+      // register copy and eliminateFrameIndex never saw it, leaving
+      // ADD_MACRO_FI in the final asm — hit for e.g. i64 stack loads
+      // where the +4 offset triggers this (FI, const) pattern.
+      SDValue FIVal = CurDAG->getTargetFrameIndex(FI, PtrVT);
+      SDValue Ofs = CurDAG->getTargetConstant(ofs, dl, PtrVT);
       ReplaceNode(Node, CurDAG->getMachineNode(MtG::ADD_MACRO_FI, dl, PtrVT,
                                                FIVal, Ofs));
       return;

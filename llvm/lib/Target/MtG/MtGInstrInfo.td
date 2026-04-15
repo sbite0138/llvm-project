@@ -2,7 +2,7 @@
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-IdentifiGR: Apache-2.0 WITH LLVM-exception
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -36,6 +36,17 @@ def SDT_MtGCallSeqEnd : SDCallSeqEnd <[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
 def MtGCallSeqStart : SDNode<"ISD::CALLSEQ_START", SDT_MtGCallSeqStart, [SDNPHasChain, SDNPOutGlue]>;
 def MtGCallSeqEnd : SDNode<"ISD::CALLSEQ_END", SDT_MtGCallSeqEnd, [SDNPHasChain, SDNPOutGlue]>;
 
+// I/O builtins used by __mtg_output and __mtg_input_{a,b}.
+def SDT_MtGOutput : SDTypeProfile<0, 1, [SDTCisVT<0, i32>]>;
+def MtGISD_OUTPUT : SDNode<"MtGISD::OUTPUT", SDT_MtGOutput,
+                           [SDNPHasChain, SDNPSideEffect]>;
+
+def SDT_MtGInput : SDTypeProfile<1, 0, [SDTCisVT<0, i32>]>;
+def MtGISD_INPUT_A : SDNode<"MtGISD::INPUT_A", SDT_MtGInput,
+                            [SDNPHasChain, SDNPSideEffect]>;
+def MtGISD_INPUT_B : SDNode<"MtGISD::INPUT_B", SDT_MtGInput,
+                            [SDNPHasChain, SDNPSideEffect]>;
+
 
 //===----------------------------------------------------------------------===//
 // MtG Operand Definitions.
@@ -46,6 +57,13 @@ def mtgimm : Operand<i32>,
             ImmLeaf<i32, [{return isInt<32>(Imm);}]> {
   let DecoderMethod = "decodeImmOperand<32>";
 }
+
+// One base-12 card digit (0..11). Used for NumBuild's two immediate fields
+// and for any other slot that corresponds directly to a Y or Z card in the
+// encoding. Keeping the range tight lets the binary encoder reject
+// out-of-range values via assertion and documents the ISA shape.
+def cardimm : Operand<i32>,
+              ImmLeaf<i32, [{return Imm >= 0 && Imm <= 11;}]>;
 
 def calltarget : Operand<iPTR> {
   let EncoderMethod   = "getCallTargetOpValue";
@@ -82,16 +100,6 @@ let Defs = [R2, R0], Uses = [R2], hasSideEffects = 1, isCodeGenOnly = 1,  isPseu
 //===----------------------------------------------------------------------===//
 // Move Instructions
 
-
-
-// for pass building, we need a some non-pseudo instruction
-def NOP : CCCForm<0b000000000000,
-                    (outs GR:$dst), (ins),
-                    "NOP $dst",[]>{
-                      let isPseudo=0;
-                      let isCodeGenOnly = 0;
-                      let isAsmParserOnly = 0;
-                    }
 
 
 let isBarrier = 1, isBranch = 1, isTerminator = 1, Defs = [R0] in
@@ -227,163 +235,145 @@ def ADD_MACRO_FI : Pseudo<
 
 
 
-// NON-PSEUDO/MACRO INSTRUCTIONS
+// =========================================================================
+// Real (non-pseudo) instructions, grouped by X field per the MtG spec.
+// =========================================================================
 
+// --- X=0 : Add (rY += rZ) ------------------------------------------------
+let Constraints = "$rY = $rY_in" in
+def ADD : MtGFormCRR<0,
+                     (outs GR:$rY), (ins GR:$rY_in, GR:$rZ),
+                     "Add\t $rY, $rZ", []>;
 
-def MOVE : CRRForm<0b1001, (outs GR:$dst), (ins  GR:$src),
-                    "Move\t $dst, $src",[]>;  
+// --- X=1 : Sub family ----------------------------------------------------
+let Constraints = "$rY = $rY_in", Defs = [FLAG] in
+def SUBCOND : MtGFormCRR<1,
+                         (outs GR:$rY), (ins GR:$rY_in, GR:$rZ),
+                         "SubCond\t $rY, $rZ", []>;
 
-def ZERO : CRRForm<0b1001, (outs GR:$dst), (ins),
-                    "Zero\t $dst",[]>;  
+let Constraints = "$r = $r_in", Defs = [FLAG] in
+def SUB1COND : MtGFormCSR<1,
+                          (outs GR:$r), (ins GR:$r_in),
+                          "Sub1Cond\t $r", []>;
 
-def NUMBUILD: CIIForm<0b1010, (outs), (ins mtgimm:$imm1, mtgimm:$imm2),
-                    "NumBuild\t $imm1, $imm2",[]>{
-                    let Defs = [R0];
+// --- X=2 : I/O, flag reads, (Rand6/Rand20 not wired yet) -----------------
+let hasSideEffects = 1, mayLoad = 1 in {
+def INPUTA : MtGFormCRC<2, 0,
+                        (outs GR:$rY), (ins),
+                        "AInput\t $rY",
+                        [(set GR:$rY, (MtGISD_INPUT_A))]>;
+def INPUTB : MtGFormCRC<2, 1,
+                        (outs GR:$rY), (ins),
+                        "BInput\t $rY",
+                        [(set GR:$rY, (MtGISD_INPUT_B))]>;
 }
 
-
-let Constraints = "$src1 = $dst" in {
-
-def ADD : CRRForm<0b0000, (outs GR:$dst), (ins GR:$src1, GR:$src2),
-                    "Add\t $dst, $src2",[]>;
-
-def ADD1 : CCRForm<0b01000001, (outs GR:$dst), (ins GR:$src1),
-                    "Add1\t $dst",[]>;
-
-// 1111 means same as src1 (actual code is `1 Z Z`)
-def SUB1COND : CCRForm<0b00011111, (outs GR:$dst), (ins GR:$src1),
-                    "Sub1Cond\t $dst",[]>{
-                    let Defs = [FLAG];
-                  }
-
-def MULT : CRRForm<0b1010, (outs GR:$dst), (ins GR:$src1, GR:$src2),
-                    "Mult\t $dst, $src2",[]>;
-
-
-def DIVIDE : CCRForm<0b01000110, (outs GR:$dst), (ins GR:$src1),
-                    "Divide\t $dst ; R6, $dst <- ($dst / R0, $dst % R0)",[]>{
-      let Uses = [R0];
-      let Defs = [R6];
-    }
-
-def SUBCOND : CRRForm<0b0001, (outs GR:$dst), (ins GR:$src1, GR:$src2),
-                    "SubCond\t $dst, $src2",[]>{
-                    let Defs = [FLAG];
-  }
+let Uses = [FLAG] in {
+def SETF  : MtGFormCRC<2, 2, (outs GR:$rY), (ins), "SetF\t $rY",  []>;
+def SETNF : MtGFormCRC<2, 3, (outs GR:$rY), (ins), "SetNF\t $rY", []>;
 }
 
-def SETF: CRCForm<0b00100010, (outs GR:$dst), (ins),
-                    "SetF\t $dst",[]>{
-                    let Uses = [FLAG];
+// --- X=3 : Jump / Call / Return -----------------------------------------
+// The hardware encoding for Jumps is JumpFwd/Bwd at (3,0)/(3,1) with the
+// bottom 4 bits selecting either a constant Z (1..11) or "read r0" (Z=0).
+// LLVM only emits the r0 form — the preceding pair of NumBuilds loads the
+// real displacement into r0 — so at the binary level Z is always 0.
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Uses = [R0] in {
+def JUMPFWD : MtGFormCCC<3, 0, 0, (outs), (ins brtarget:$brt),
+                         "JumpFwd\t $brt", []>;
+def JUMPBWD : MtGFormCCC<3, 1, 0, (outs), (ins brtarget:$brt),
+                         "JumpBwd\t $brt", []>;
+}
+let isBarrier = 1, isBranch = 1, isTerminator = 1, Uses = [R0, FLAG] in {
+def JUMPFWDNF : MtGFormCCC<3, 2, 0, (outs), (ins brtarget:$brt),
+                           "JumpFwdNF\t $brt", []>;
+def JUMPBWDNF : MtGFormCCC<3, 3, 0, (outs), (ins brtarget:$brt),
+                           "JumpBwdNF\t $brt", []>;
+def JUMPFWDF  : MtGFormCCC<3, 4, 0, (outs), (ins brtarget:$brt),
+                           "JumpFwdF\t $brt", []>;
+def JUMPBWDF  : MtGFormCCC<3, 5, 0, (outs), (ins brtarget:$brt),
+                           "JumpBwdF\t $brt", []>;
 }
 
-def SETNF: CRCForm<0b00100011, (outs GR:$dst), (ins),
-                    "SetNF\t $dst",[]>{
-                    let Uses = [FLAG];
+// Return uses Z=0 (read r0) unconditionally; the preceding NumBuild pair
+// holds Z'. See MtGBranchSelector.
+let isReturn = 1, isTerminator = 1, isBarrier = 1, hasCtrlDep = 1,
+    hasDelaySlot = 0, Uses = [R0] in
+def RETURN : MtGFormCCC<3, 7, 0, (outs), (ins), "Return\t r0", []>;
+
+// --- X=4 : Halts, unary arithmetic, I/O out, Divide ---------------------
+let isTerminator = 1, isBarrier = 1, hasCtrlDep = 1 in {
+def HALTD : MtGFormCCC<4, 0, 0, (outs), (ins), "HaltD", []>;
+def HALTA : MtGFormCCC<4, 0, 1, (outs), (ins), "HaltA", []>;
+def HALTB : MtGFormCCC<4, 0, 2, (outs), (ins), "HaltB", []>;
 }
 
-// TODO change syntax 
-def FISZERO : CCRForm<0b00010000, (outs), (ins GR:$src1),
-                    "FIsZero\t $src1",[]>{
-                    let Defs = [FLAG];
-}
+let Constraints = "$rZ = $rZ_in" in
+def ADD1 : MtGFormCCR<4, 1,
+                      (outs GR:$rZ), (ins GR:$rZ_in),
+                      "Add1\t $rZ", []>;
 
-def FLESS : CRRForm<0b1011, (outs), (ins GR:$src1, GR:$src2),
-                    "FLess\t $src1, $src2",[]>{
-                    let Defs = [FLAG];
-}
-
-
-def HALVE : CCRForm<0b01000010, (outs GR:$dst), (ins GR:$src1),
-                    "Halve\t $dst",[]>{
-                    let Constraints = "$dst = $src1";
-                    let Defs = [FLAG];
-}
-
-let isBarrier = 1, isBranch = 1, isTerminator = 1 in
-def JUMPFWD : CCCForm<0b001100000000, (outs), (ins  brtarget:$brt),
-                    "JumpFwd\t $brt",[]>{
-                    let Uses = [R0];
-}
-
-let isBarrier = 1, isBranch = 1, isTerminator = 1 in
-def JUMPBWD : CCRForm<0b00110001, (outs), (ins  brtarget:$brt),
-                    "JumpBwd\t $brt",[]>{
-                    let Uses = [R0];
-}
-
-let isBarrier = 1, isBranch = 1, isTerminator = 1 in
-def JUMPFWDNF : CCCForm<0b001100000000, (outs), (ins  brtarget:$brt),
-                    "JumpFwdNF\t $brt",[]>{
-                    let Uses = [R0, FLAG];
-}
-
-let isBarrier = 1, isBranch = 1, isTerminator = 1 in
-def JUMPBWDNF : CCRForm<0b00110011, (outs), (ins  brtarget:$brt),
-                    "JumpBwdNF\t $brt",[]>{
-                    let Uses = [R0, FLAG];
-}
-
-let isBarrier = 1, isBranch = 1, isTerminator = 1 in
-def JUMPFWDF : CCRForm<0b00110100, (outs), (ins  brtarget:$brt),
-                    "JumpFwdF\t $brt",[]>{
-                    let Uses = [R0, FLAG];
-}
-
-let isBarrier = 1, isBranch = 1, isTerminator = 1 in
-def JUMPBWDF : CCRForm<0b00110101, (outs), (ins  brtarget:$brt),
-                    "JumpBwdF\t $brt",[]>{
-                    let Uses = [R0, FLAG];
-}
-
-
-def STORE : CRRForm<0b1000, (outs), (ins GR:$addr,  GR:$val),
-                    "Store\t $addr, $val",[]>{
-                    let mayStore = 1;
-}
-
-def LOAD : CRRForm<0b1001, (outs  GR:$val), (ins GR:$addr),
-                    "Load\t $val, $addr",[]>{
-                    let mayLoad = 1;
-}
-
-
-
-
-
-def SDT_MtGOutput
-  : SDTypeProfile<0, 1, [SDTCisVT<0, i32>]>;
-
-def MtGISD_OUTPUT
-  : SDNode<"MtGISD::OUTPUT", SDT_MtGOutput,
-           [SDNPHasChain, SDNPSideEffect]>;
+let Constraints = "$rZ = $rZ_in", Defs = [FLAG] in
+def HALVE : MtGFormCCR<4, 2,
+                       (outs GR:$rZ), (ins GR:$rZ_in),
+                       "Halve\t $rZ", []>;
 
 let hasSideEffects = 1 in
-def OUTPUT : CCRForm<0b01000011, (outs), (ins GR:$src1),
-                    "Output\t $src1", [(MtGISD_OUTPUT GR:$src1)]> {
+def OUTPUT : MtGFormCCR<4, 3,
+                        (outs), (ins GR:$rZ),
+                        "Output\t $rZ",
+                        [(MtGISD_OUTPUT GR:$rZ)]>;
+
+let Constraints = "$rZ = $rZ_in", Uses = [R0], Defs = [R6, FLAG] in
+def DIVIDE : MtGFormCCR<4, 6,
+                        (outs GR:$rZ), (ins GR:$rZ_in),
+                        "Divide\t $rZ ; R6, $rZ <- ($rZ / R0, $rZ % R0)",
+                        []>;
+
+// --- X=5 : Move / Zero --------------------------------------------------
+def MOVE : MtGFormCRR<5,
+                      (outs GR:$rY), (ins GR:$rZ),
+                      "Move\t $rY, $rZ", []>;
+
+def ZERO : MtGFormCSR<5,
+                      (outs GR:$r), (ins),
+                      "Zero\t $r", []>;
+
+// --- X=6 : Mult (rZ *= rY; destination is Z per spec) -------------------
+let Constraints = "$rZ = $rZ_in" in
+def MULT : MtGFormCRR<6,
+                      (outs GR:$rZ), (ins GR:$rY, GR:$rZ_in),
+                      "Mult\t $rZ, $rY", []>;
+
+// --- X=8/9 : Memory -----------------------------------------------------
+// NOTE: Per spec `Store mem[rZ] = rY` and `Load rY = mem[rZ]`. The asm
+// form here prints `$addr, $val` / `$val, $addr` which is the *old* order
+// — kept for this commit so pure format normalization is isolated. Stage 2
+// fixes the order to match the spec's Y/Z roles.
+let mayStore = 1 in
+def STORE : MtGFormCRR<8,
+                       (outs), (ins GR:$rY, GR:$rZ),
+                       "Store\t $rY, $rZ", []>;
+
+let mayLoad = 1 in
+def LOAD : MtGFormCRR<9,
+                      (outs GR:$rY), (ins GR:$rZ),
+                      "Load\t $rY, $rZ", []>;
+
+// --- X=10 : NumBuild ----------------------------------------------------
+let Defs = [R0] in
+def NUMBUILD : MtGFormCII<10,
+                          (outs), (ins cardimm:$yimm, cardimm:$zimm),
+                          "NumBuild\t $yimm, $zimm", []>;
+
+// --- X=11 : Flag-setting compare ----------------------------------------
+let Defs = [FLAG] in {
+def FLESS : MtGFormCRR<11,
+                       (outs), (ins GR:$rY, GR:$rZ),
+                       "FLess\t $rY, $rZ", []>;
+def FISZERO : MtGFormCSR<11,
+                         (outs), (ins GR:$r),
+                         "FIsZero\t $r", []>;
 }
 
-// Inputs: AInput (X=2,Y=reg,Z=0) and BInput (X=2,Y=reg,Z=1).
-def SDT_MtGInput : SDTypeProfile<1, 0, [SDTCisVT<0, i32>]>;
 
-def MtGISD_INPUT_A : SDNode<"MtGISD::INPUT_A", SDT_MtGInput,
-                            [SDNPHasChain, SDNPSideEffect]>;
-def MtGISD_INPUT_B : SDNode<"MtGISD::INPUT_B", SDT_MtGInput,
-                            [SDNPHasChain, SDNPSideEffect]>;
-
-let hasSideEffects = 1, mayLoad = 1 in {
-def INPUTA : CRCForm<0b00100000, (outs GR:$dst), (ins),
-                    "AInput\t $dst", [(set GR:$dst, (MtGISD_INPUT_A))]>;
-def INPUTB : CRCForm<0b00100001, (outs GR:$dst), (ins),
-                    "BInput\t $dst", [(set GR:$dst, (MtGISD_INPUT_B))]>;
-}
-
-
-// Emitted with an explicit `r0` operand so the asm shows the same form the
-// hardware sees: Return's Z' field is 0 (meaning "read r0 as the offset"),
-// with the two preceding NumBuild placeholders filling r0 with the
-// entry-to-this-Return instruction count (patched by MtGBranchSelector).
-let isReturn = 1, isTerminator = 1, hasDelaySlot = 0, isBarrier = 1,
-    hasCtrlDep = 1, Uses = [R0] in {
-  def RETURN : Pseudo<(outs), (ins), "Return\t r0", []>;
-}

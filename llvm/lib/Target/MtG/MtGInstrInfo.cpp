@@ -17,6 +17,7 @@
 #include "MtGRegisterInfo.h"
 #include "MtGTargetMachine.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -383,17 +384,30 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // part (quotient) is fetched back from R6. The address lives in a
     // separate IterAddrReg so we don't corrupt the caller's $addr.
     //
-    // Both scratches are picked dynamically from {R3, R4, R5, R7}: the
-    // pseudo declares Defs=[R0..R7] so regalloc guarantees no user vreg is
-    // live across this macro in those registers, but $val or $addr might
-    // themselves be allocated to one of them — we just avoid clashes.
+    // Scratches come from {R3, R4, R5, R7}; we must avoid $val, $addr, AND
+    // any register that's still live at this MI — RegAllocFast sometimes
+    // leaves values live across pseudos whose Defs list should have forced
+    // a spill, so we do our own liveness-aware pick rather than trusting
+    // the blanket Defs.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
     assert(ValReg != AddrReg && "STOREBYTEWISE expects distinct val and addr");
 
+    const auto &MBB_ = *MI.getParent();
+    LivePhysRegs LivePhys(*MBB_.getParent()->getSubtarget().getRegisterInfo());
+    LivePhys.addLiveOuts(MBB_);
+    for (auto It = MBB_.rbegin(); It != MBB_.rend(); ++It) {
+      if (&*It == &MI)
+        break;
+      LivePhys.stepBackward(*It);
+    }
+    const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
+
     Register IterAddrReg, ByteWorkReg;
     for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
       if (R == ValReg || R == AddrReg)
+        continue;
+      if (!LivePhys.available(MRI_, R))
         continue;
       if (!IterAddrReg.isValid())
         IterAddrReg = R;
@@ -437,15 +451,32 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // scratch is needed (the iterating address register) — we reuse R6 as
     // the per-iteration byte temp because it isn't touched between the LOAD
     // / ADD / MULT / SUB1COND operations of the loop.
+    //
+    // IterAddrReg must avoid $val, $addr, AND any register that's still
+    // live at this MI. RegAllocFast sometimes leaves values live across
+    // pseudos whose Defs list should have forced a spill, so we don't
+    // trust the blanket Defs and instead ask LivePhysRegs directly.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
 
+    const auto &MBB_ = *MI.getParent();
+    LivePhysRegs LivePhys(*MBB_.getParent()->getSubtarget().getRegisterInfo());
+    LivePhys.addLiveOuts(MBB_);
+    for (auto It = MBB_.rbegin(); It != MBB_.rend(); ++It) {
+      if (&*It == &MI)
+        break;
+      LivePhys.stepBackward(*It);
+    }
+    const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
+
     Register IterAddrReg;
     for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
-      if (R != ValReg && R != AddrReg) {
-        IterAddrReg = R;
-        break;
-      }
+      if (R == ValReg || R == AddrReg)
+        continue;
+      if (!LivePhys.available(MRI_, R))
+        continue;
+      IterAddrReg = R;
+      break;
     }
     assert(IterAddrReg.isValid() &&
            "Could not find scratch for LOADBYTEWISE_MACRO");

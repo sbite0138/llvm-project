@@ -161,17 +161,46 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     ++i;
     assert(i < MI.getNumOperands() && "Instr doesn't have FrameIndex operand!");
   }
+  // Frame layout and the MtG-specific offset formula.
+  //
+  // Non-fixed frame objects (locals, spill slots) are LOWER in the frame
+  // than the emergency slot, so their SP-relative address is
+  //
+  //     SP + objectOffset + stackSize + SPAdj + emergency
+  //
+  // where `emergency` compensates for the 4 bytes the prologue carves out
+  // at *SP for the scavenger.
+  //
+  // Fixed frame objects (incoming stack arguments) live ABOVE the frame,
+  // in the *caller's* outgoing-arg region. Per MtGISelLowering::LowerCall
+  // the caller writes them at `caller_SP + emergency + locMemOffset`, i.e.
+  // just above the caller's own emergency slot. From the callee's SP:
+  //
+  //   * If the callee has a prologue (stackSize != 0 || adjustsStack),
+  //     SP has been lowered by stackSize+emergency and the arg is at
+  //       callee_SP + stackSize + emergency (top of callee frame)
+  //                + emergency               (skip caller's emergency)
+  //                + locMemOffset
+  //     which is the plain formula plus one extra `emergency`.
+  //
+  //   * If the callee has no prologue (leaf with stackSize=0), callee_SP
+  //     equals caller_SP and the single `emergency` in the plain formula
+  //     already accounts for the caller's emergency slot — no extra term
+  //     is needed.
+  const bool HasPrologue = MFI.getStackSize() != 0 || MFI.adjustsStack();
+  auto computeFIOffset = [&](int FI, int64_t ExtraOffset) -> int64_t {
+    int64_t Off = MFI.getObjectOffset(FI) + MFI.getStackSize() + SPAdj +
+                  MtGFrameLowering::kEmergencySlotSize + ExtraOffset;
+    if (MFI.isFixedObjectIndex(FI) && HasPrologue)
+      Off += MtGFrameLowering::kEmergencySlotSize;
+    return Off;
+  };
+
   if (MI.getOpcode() == MtG::ADD_MACRO_FI) {
     const auto DstReg = MI.getOperand(0).getReg();
     const auto FrameIndex = MI.getOperand(1).getIndex();
     const auto Offset = MI.getOperand(2).getImm();
-    // SP was adjusted by StackSize + kEmergencySlotSize in the prologue,
-    // and the byte at SP+0 belongs to the emergency-spill slot. User
-    // frame slots therefore start at SP + kEmergencySlotSize, so add
-    // that to the conventional SP-relative formula.
-    const int64_t totalOffset = MFI.getObjectOffset(FrameIndex) +
-                                MFI.getStackSize() + SPAdj + Offset +
-                                MtGFrameLowering::kEmergencySlotSize;
+    const int64_t totalOffset = computeFIOffset(FrameIndex, Offset);
 
     if (DstReg != getFrameRegister(MF))
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), DstReg)
@@ -192,11 +221,7 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
              MI.getOpcode() == MtG::LOADBYTEWISE_FI_MACRO) {
     const auto OpReg = MI.getOperand(0).getReg();
     const auto FrameIndex = MI.getOperand(1).getIndex();
-    // See ADD_MACRO_FI above: + kEmergencySlotSize compensates for the
-    // 4 extra bytes the prologue carved out at *SP for the scavenger.
-    const int64_t totalOffset = MFI.getObjectOffset(FrameIndex) +
-                                MFI.getStackSize() + SPAdj +
-                                MtGFrameLowering::kEmergencySlotSize;
+    const int64_t totalOffset = computeFIOffset(FrameIndex, /*ExtraOffset=*/0);
 
     // We need a scratch register to compute the address (FP + offset). MtG
     // has no base+offset store, so the scratch is mandatory; the trailing

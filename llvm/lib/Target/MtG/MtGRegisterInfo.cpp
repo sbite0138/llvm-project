@@ -40,8 +40,6 @@ using namespace llvm;
 // FIXME: Provide proper call frame setup / destroy opcodes.
 MtGRegisterInfo::MtGRegisterInfo() : MtGGenRegisterInfo(0) {}
 
-namespace {
-
 // Emit a byte-wise save of $VictimReg into the emergency-spill slot at *SP
 // (the 4 extra bytes reserved by MtGFrameLowering::emitPrologue). The
 // expansion deliberately uses no scratch register beyond what the MtG ISA
@@ -51,9 +49,10 @@ namespace {
 //   * R2 (SP) is the address iterator — it is mutated and restored.
 //   * VictimReg itself is destroyed during byte extraction, but its value is
 //     persisted to memory so destroying it is fine.
-static void emitEmergencySave(MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator II,
-                              const TargetInstrInfo &TII, Register VictimReg) {
+void MtGRegisterInfo::emitEmergencySave(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator II,
+                                        const TargetInstrInfo &TII,
+                                        Register VictimReg) {
   DebugLoc DL = II != MBB.end() ? II->getDebugLoc() : DebugLoc();
   // R0 = 256
   BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
@@ -85,10 +84,10 @@ static void emitEmergencySave(MachineBasicBlock &MBB,
 //   * R2 (SP) is the address iterator — destroyed and restored, ending at
 //     its original position.
 //   * VictimReg is the destination of the reload.
-static void emitEmergencyReload(MachineBasicBlock &MBB,
-                                MachineBasicBlock::iterator II,
-                                const TargetInstrInfo &TII,
-                                Register VictimReg) {
+void MtGRegisterInfo::emitEmergencyReload(MachineBasicBlock &MBB,
+                                          MachineBasicBlock::iterator II,
+                                          const TargetInstrInfo &TII,
+                                          Register VictimReg) {
   DebugLoc DL = II != MBB.end() ? II->getDebugLoc() : DebugLoc();
   // SP += 3 : start at the high-byte slot (SP+3).
   for (int i = 0; i < 3; ++i)
@@ -113,8 +112,6 @@ static void emitEmergencyReload(MachineBasicBlock &MBB,
   }
   // SP is now back at its original position (3 ADD1's matched by 3 SUB1COND's).
 }
-
-} // anonymous namespace
 
 const MCPhysReg *
 MtGRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {

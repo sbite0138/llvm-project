@@ -388,7 +388,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // any register that's still live at this MI — RegAllocFast sometimes
     // leaves values live across pseudos whose Defs list should have forced
     // a spill, so we do our own liveness-aware pick rather than trusting
-    // the blanket Defs.
+    // the blanket Defs. If fewer than 2 free candidates are available we
+    // evict live ones through the emergency-spill slot and reload them
+    // after the expansion.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
     assert(ValReg != AddrReg && "STOREBYTEWISE expects distinct val and addr");
@@ -403,21 +405,40 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
 
-    Register IterAddrReg, ByteWorkReg;
+    // Collect free candidates first; fall back to one evicted live reg
+    // (via the emergency slot) if we can't find two truly free. The
+    // emergency slot is a single 4-byte location at *SP, so at most one
+    // eviction is possible per expansion. For STOREBYTEWISE we need two
+    // scratches, hence a function-local function with zero free regs
+    // here is a hard failure.
+    SmallVector<Register, 2> Free, Candidates;
     for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
       if (R == ValReg || R == AddrReg)
         continue;
-      if (!LivePhys.available(MRI_, R))
-        continue;
-      if (!IterAddrReg.isValid())
-        IterAddrReg = R;
-      else {
-        ByteWorkReg = R;
-        break;
-      }
+      Candidates.push_back(R);
+      if (LivePhys.available(MRI_, R))
+        Free.push_back(R);
     }
-    assert(IterAddrReg.isValid() && ByteWorkReg.isValid() &&
-           "Could not find scratches for STOREBYTEWISE_MACRO");
+    Register IterAddrReg, ByteWorkReg, Victim;
+    if (Free.size() >= 2) {
+      IterAddrReg = Free[0];
+      ByteWorkReg = Free[1];
+    } else if (Free.size() == 1 && Candidates.size() >= 2) {
+      IterAddrReg = Free[0];
+      for (Register R : Candidates)
+        if (R != IterAddrReg) {
+          ByteWorkReg = R;
+          Victim = R;
+          break;
+        }
+    } else {
+      report_fatal_error("MtG: STOREBYTEWISE_MACRO needs 2 scratches but 0 "
+                         "of {R3,R4,R5,R7} are free — emergency slot only "
+                         "holds one 32-bit value, cannot evict two");
+    }
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
+                                         MI.getIterator(), TII, Victim);
 
     BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
     BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, ValReg);
@@ -442,6 +463,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
 
     expandPostRAPseudo(*NumBuildMI);
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII, Victim);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {
@@ -455,7 +479,8 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // IterAddrReg must avoid $val, $addr, AND any register that's still
     // live at this MI. RegAllocFast sometimes leaves values live across
     // pseudos whose Defs list should have forced a spill, so we don't
-    // trust the blanket Defs and instead ask LivePhysRegs directly.
+    // trust the blanket Defs and instead ask LivePhysRegs directly. If
+    // no candidate is free we evict one through the emergency slot.
     auto ValReg = MI.getOperand(0).getReg();
     auto AddrReg = MI.getOperand(1).getReg();
 
@@ -469,17 +494,31 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
 
-    Register IterAddrReg;
+    Register IterAddrReg, Victim;
     for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
       if (R == ValReg || R == AddrReg)
         continue;
-      if (!LivePhys.available(MRI_, R))
-        continue;
-      IterAddrReg = R;
-      break;
+      if (LivePhys.available(MRI_, R)) {
+        IterAddrReg = R;
+        break;
+      }
     }
-    assert(IterAddrReg.isValid() &&
-           "Could not find scratch for LOADBYTEWISE_MACRO");
+    if (!IterAddrReg.isValid()) {
+      // Every candidate is live — evict one through the emergency slot.
+      for (Register R : {MtG::R3, MtG::R4, MtG::R5, MtG::R7}) {
+        if (R == ValReg || R == AddrReg)
+          continue;
+        IterAddrReg = R;
+        Victim = R;
+        break;
+      }
+    }
+    if (!IterAddrReg.isValid())
+      report_fatal_error("MtG: LOADBYTEWISE_MACRO cannot find any scratch in "
+                         "{R3,R4,R5,R7} distinct from $val and $addr");
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
+                                         MI.getIterator(), TII, Victim);
 
     std::vector<MachineInstr *> NumBuildMIs;
 
@@ -515,6 +554,9 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     for (auto *NumBuildMI : NumBuildMIs)
       expandPostRAPseudo(*NumBuildMI);
 
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII, Victim);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::REM_MACRO) {

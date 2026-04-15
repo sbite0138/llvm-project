@@ -288,21 +288,34 @@ ninja -j4 clang llc mtg-resource-headers
 python3 ~/llvm-project/ursa/src/main.py /tmp/loop_test.s
 ```
 
-Triggering the **emergency-spill scavenge path** in `eliminateFrameIndex`
-deserves its own check after touching anything around register pressure or
-the byte-wise spill macros. Force it on by temporarily editing
-`MtGRegisterInfo.cpp`:
+Triggering the **emergency-spill scavenge path** deserves its own check
+after touching anything around register pressure or the byte-wise spill
+macros. There are three places the scavenge path fires — all work the
+same way: a register from {R3, R4, R5, R7} is saved to the 4-byte
+emergency slot at *SP, used as a temporary scratch, then reloaded.
 
-```cpp
-// In the FI scavenge loop, change
-if (LivePhys.available(MF.getRegInfo(), R)) {
-// to
-if (false && LivePhys.available(MF.getRegInfo(), R)) {
-```
+1. `MtGRegisterInfo.cpp` — `eliminateFrameIndex` for
+   `STOREBYTEWISE_FI_MACRO` / `LOADBYTEWISE_FI_MACRO`. Force on with:
 
-then rebuild and rerun the lit + ursa programs. All should still produce
-correct output (the emergency code path is the only thing that runs).
-Revert the edit when done.
+   ```cpp
+   if (false && LivePhys.available(MF.getRegInfo(), R)) {
+   ```
+
+2. `MtGInstrInfo.cpp` — `LOADBYTEWISE_MACRO` expansion. Force on with the
+   same `false &&` gate on the free-scratch search; the second loop
+   will evict one live register through the emergency slot.
+
+3. `MtGInstrInfo.cpp` — `STOREBYTEWISE_MACRO` expansion. Force the
+   single-free path (needs exactly one free scratch + one eviction) with:
+
+   ```cpp
+   if (LivePhys.available(MRI_, R) && Free.empty())  // cap at 1 free
+     Free.push_back(R);
+   ```
+
+After each change rebuild and rerun the lit + ursa programs; all should
+produce their normal output (the scavenge code path is the only thing
+that runs in the affected sites). Revert the edits when done.
 
 ## Inspecting compiled output
 

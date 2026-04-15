@@ -49,6 +49,26 @@ public:
 
   // Debug information queries.
   Register getFrameRegister(const MachineFunction &MF) const override;
+
+  // Byte-wise save/reload of a whole 32-bit value into the 4-byte
+  // emergency-spill slot at *SP. These are used both by eliminateFrameIndex
+  // (when a byte-wise FI pseudo can't find a free scratch and needs to
+  // evict a live register) and by the byte-wise load/store macro
+  // expansions in MtGInstrInfo when *they* can't find free scratches.
+  //
+  // The expansion itself touches only R0 (via NumBuild), R6 (Divide's
+  // quotient on save, per-iteration byte temp on reload), R2 (SP, mutated
+  // and restored), and VictimReg. The caller is responsible for ensuring
+  // the emergency slot at *SP is available — i.e. the containing function
+  // must have emitted a prologue that reserved it.
+  static void emitEmergencySave(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator II,
+                                const TargetInstrInfo &TII,
+                                Register VictimReg);
+  static void emitEmergencyReload(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator II,
+                                  const TargetInstrInfo &TII,
+                                  Register VictimReg);
 };
 
 } // end namespace llvm

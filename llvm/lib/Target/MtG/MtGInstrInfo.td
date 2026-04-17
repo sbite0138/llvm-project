@@ -247,15 +247,30 @@ let Constraints = "$src1 = $dst" in {
                     "LT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setlt GR:$src1, GR:$src2))]>;
    def GT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "GT_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setgt GR:$src1, GR:$src2))]>;
+   def LE_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "LE_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setle GR:$src1, GR:$src2))]>;
+   def GE_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "GE_MACRO\t $dst, $src1, $src2",[(set GR:$dst, (setge GR:$src1, GR:$src2))]>;
+   def ULT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "ULT_MACRO\t $dst, $src1, $src2",[]>;
+   def UGT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "UGT_MACRO\t $dst, $src1, $src2",[]>;
+   def ULE_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "ULE_MACRO\t $dst, $src1, $src2",[]>;
+   def UGE_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "UGE_MACRO\t $dst, $src1, $src2",[]>;
 
   def SELECT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$cond, GR:$tval, GR:$fval),
                     "SELECT_MACRO\t $dst, $cond, $tval, $fval",[(set GR:$dst, (select GR:$cond, GR:$tval, GR:$fval))]>;
 }
 def : Pat<(i32  (setcc GR:$src1, GR:$src2, SETUGT)),
-          (GT_MACRO GR:$src1, GR:$src2)>;     
-
+          (UGT_MACRO GR:$src1, GR:$src2)>;
 def : Pat<(i32  (setcc GR:$src1, GR:$src2, SETULT)),
-          (LT_MACRO GR:$src1, GR:$src2)>;     
+          (ULT_MACRO GR:$src1, GR:$src2)>;
+def : Pat<(i32  (setcc GR:$src1, GR:$src2, SETULE)),
+          (ULE_MACRO GR:$src1, GR:$src2)>;
+def : Pat<(i32  (setcc GR:$src1, GR:$src2, SETUGE)),
+          (UGE_MACRO GR:$src1, GR:$src2)>;     
 
 def : Pat<(i32  (urem GR:$src1, GR:$src2)),
           (REM_MACRO GR:$src1, GR:$src2)>;     

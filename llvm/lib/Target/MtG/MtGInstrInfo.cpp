@@ -679,27 +679,33 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
     MI.eraseFromParent();
     return true;
-  } else if (MI.getOpcode() == MtG::LT_MACRO) {
-    // Want dst = (src1 < src2). FLess sets flag = rZ < rY, so pass
-    // Y=src2, Z=src1.
+  } else if (MI.getOpcode() == MtG::ULT_MACRO ||
+             MI.getOpcode() == MtG::UGT_MACRO ||
+             MI.getOpcode() == MtG::ULE_MACRO ||
+             MI.getOpcode() == MtG::UGE_MACRO) {
+    // Unsigned comparisons: FLess is already unsigned, no bias needed.
+    unsigned Op = MI.getOpcode();
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg1 = MI.getOperand(1).getReg();
     auto SrcReg2 = MI.getOperand(2).getReg();
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
-        .addUse(SrcReg2)
-        .addUse(SrcReg1);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
-    MI.eraseFromParent();
-    return true;
-  } else if (MI.getOpcode() == MtG::GT_MACRO) {
-    // Want dst = (src1 > src2) = (src2 < src1). Pass Y=src1, Z=src2.
-    auto DstReg = MI.getOperand(0).getReg();
-    auto SrcReg1 = MI.getOperand(1).getReg();
-    auto SrcReg2 = MI.getOperand(2).getReg();
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
-        .addUse(SrcReg1)
-        .addUse(SrcReg2);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+
+    if (Op == MtG::ULT_MACRO) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+          .addUse(SrcReg2).addUse(SrcReg1);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+    } else if (Op == MtG::UGT_MACRO) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+          .addUse(SrcReg1).addUse(SrcReg2);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETF), DstReg);
+    } else if (Op == MtG::ULE_MACRO) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+          .addUse(SrcReg1).addUse(SrcReg2);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETNF), DstReg);
+    } else { // UGE_MACRO
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::FLESS))
+          .addUse(SrcReg2).addUse(SrcReg1);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SETNF), DstReg);
+    }
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::RET_PSEUDO) {

@@ -818,6 +818,62 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     MI.eraseFromParent();
     break;
   }
+  case MtG::LT_MACRO:
+  case MtG::GT_MACRO:
+  case MtG::LE_MACRO:
+  case MtG::GE_MACRO: {
+    // Signed comparisons: FLess is unsigned. Bias both operands by
+    // (val + 0x80000000) mod 2^32, converting signed order to unsigned.
+    // ADD produces the sum (may exceed 32 bits since MtG is arbitrary-
+    // precision), then SubCond wraps it back: if sum >= 2^32 then sum -= 2^32.
+    unsigned Op = MI.getOpcode();
+    Register DstReg = MI.getOperand(0).getReg();
+    Register SrcReg1 = MI.getOperand(1).getReg();
+    Register SrcReg2 = MI.getOperand(2).getReg();
+
+    // Bias both operands: B = (val + 0x80000000) mod 2^32.
+    // We ADD 0x80000000 then SubCond with 2^32 to wrap. But MOVEIMM_MACRO
+    // clobbers R0, so we build both constants sequentially: first bias,
+    // apply to both operands, then build wrap and apply to both.
+    Register Bias = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register S1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register S2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Wrap = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register B1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register B2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), Bias)
+        .addImm((int64_t)0x80000000LL);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), S1)
+        .addUse(SrcReg1).addUse(Bias);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), S2)
+        .addUse(SrcReg2).addUse(Bias);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), Wrap)
+        .addImm((int64_t)(1ULL << 32));
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), B1)
+        .addUse(S1).addUse(Wrap);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), B2)
+        .addUse(S2).addUse(Wrap);
+
+    if (Op == MtG::LT_MACRO) {
+      BuildMI(*MBB, MI, DL, TII.get(MtG::FLESS))
+          .addUse(B2).addUse(B1);
+      BuildMI(*MBB, MI, DL, TII.get(MtG::SETF), DstReg);
+    } else if (Op == MtG::GT_MACRO) {
+      BuildMI(*MBB, MI, DL, TII.get(MtG::FLESS))
+          .addUse(B1).addUse(B2);
+      BuildMI(*MBB, MI, DL, TII.get(MtG::SETF), DstReg);
+    } else if (Op == MtG::LE_MACRO) {
+      BuildMI(*MBB, MI, DL, TII.get(MtG::FLESS))
+          .addUse(B1).addUse(B2);
+      BuildMI(*MBB, MI, DL, TII.get(MtG::SETNF), DstReg);
+    } else { // GE_MACRO
+      BuildMI(*MBB, MI, DL, TII.get(MtG::FLESS))
+          .addUse(B2).addUse(B1);
+      BuildMI(*MBB, MI, DL, TII.get(MtG::SETNF), DstReg);
+    }
+    MI.eraseFromParent();
+    break;
+  }
   // case MtG::AND_MACRO: {
 
   //   auto *LoopMBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());

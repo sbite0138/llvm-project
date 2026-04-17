@@ -66,6 +66,7 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::MULHU, MVT::i32, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+  setMinimumJumpTableEntries(UINT_MAX);
   setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::SELECT, MVT::i32, Legal);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);

@@ -50,6 +50,7 @@ MtGMCInstLower::GetExternalSymbolSymbol(const MachineOperand &MO) const {
   default:
     llvm_unreachable("Unknown target flag on GV operand");
   case 0:
+  case MtGII::MO_CALL:
     break;
   }
 

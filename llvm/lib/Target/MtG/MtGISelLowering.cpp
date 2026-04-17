@@ -62,10 +62,19 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
 
   // setStackPointerRegisterToSaveRestore(MtG::R8);
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
+  setOperationAction(ISD::MULHS, MVT::i32, Expand);
+  setOperationAction(ISD::MULHU, MVT::i32, Expand);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::SELECT, MVT::i32, Legal);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG, MVT::Other, Custom);
+  setOperationAction(ISD::VACOPY, MVT::Other, Expand);
+  setOperationAction(ISD::VAEND, MVT::Other, Expand);
 
   // Sub-word loads and truncating stores — needed for `char` / `short`
   // struct fields and any byte-level memory traffic. MtG's memory model
@@ -129,6 +138,10 @@ SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     return LowerGlobalAddress(Op, DAG);
   case ISD::SDIV:
     return LowerSDIV(Op, DAG);
+  case ISD::VASTART:
+    return LowerVASTART(Op, DAG);
+  case ISD::VAARG:
+    return LowerVAARG(Op, DAG);
   }
 }
 
@@ -348,6 +361,8 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
     Callee = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0, OpFlags);
 
+  } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    Callee = DAG.getTargetExternalSymbol(S->getSymbol(), PtrVT, MtGII::MO_CALL);
   } else {
     llvm_unreachable("Unsupported callee");
   }
@@ -452,13 +467,9 @@ SDValue MtGTargetLowering::LowerFormalArguments(
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
 
-  assert(isVarArg == false && "VarArg not supported yet");
-
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
   MtGMachineFunctionInfo *MtGMFI = MF.getInfo<MtGMachineFunctionInfo>();
-
-  MtGMFI->setVarArgsFrameIndex(0);
 
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
@@ -519,9 +530,11 @@ SDValue MtGTargetLowering::LowerFormalArguments(
     }
   }
 
-  // if (isVarArg)
-  //   writeVarArgRegs(OutChains, Chain, DL, DAG, CCInfo);
-  // @} MYRISCVXISelLowering_LowerFormalArguments_IsVarArg
+  if (isVarArg) {
+    int VarArgsOffset = CCInfo.getStackSize();
+    int FI = MFI.CreateFixedObject(4, VarArgsOffset, true);
+    MtGMFI->setVarArgsFrameIndex(FI);
+  }
 
   if (!OutChains.empty()) {
     OutChains.push_back(Chain);
@@ -894,6 +907,145 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   //   MI.eraseFromParent();
   //   return ExitMBB;
   // }
+  case MtG::SHL_VAR_MACRO:
+  case MtG::SHR_VAR_MACRO:
+  case MtG::ASHR_VAR_MACRO: {
+    unsigned Op = MI.getOpcode();
+    Register DstReg = MI.getOperand(0).getReg();
+    Register SrcReg = MI.getOperand(1).getReg();
+    Register AmtReg = MI.getOperand(2).getReg();
+
+    MachineBasicBlock *EntryMBB = MBB;
+    auto *LoopMBB = MF.CreateMachineBasicBlock(EntryMBB->getBasicBlock());
+    auto *ExitMBB = MF.CreateMachineBasicBlock(EntryMBB->getBasicBlock());
+
+    MF.insert(std::next(MachineFunction::iterator(EntryMBB)), LoopMBB);
+    MF.insert(std::next(MachineFunction::iterator(LoopMBB)), ExitMBB);
+
+    ExitMBB->splice(ExitMBB->end(), EntryMBB,
+                    std::next(MachineBasicBlock::iterator(MI)),
+                    EntryMBB->end());
+    ExitMBB->transferSuccessorsAndUpdatePHIs(EntryMBB);
+
+    EntryMBB->addSuccessor(LoopMBB);
+    EntryMBB->addSuccessor(ExitMBB);
+    LoopMBB->addSuccessor(LoopMBB);
+    LoopMBB->addSuccessor(ExitMBB);
+
+    // ---- Entry block: set up initial values and skip if amt == 0. ----
+    Register ResultInit = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register CounterInit = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register SkipCond = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    BuildMI(*EntryMBB, MI, DL, TII.get(TargetOpcode::COPY), ResultInit)
+        .addReg(SrcReg);
+    BuildMI(*EntryMBB, MI, DL, TII.get(TargetOpcode::COPY), CounterInit)
+        .addReg(AmtReg);
+
+    // For ASHR: compute sign mask before the loop.
+    // SignMask = (src >= 0x80000000) ? 0x80000000 : 0
+    Register SignMask;
+    if (Op == MtG::ASHR_VAR_MACRO) {
+      Register Threshold = MRI.createVirtualRegister(&MtG::GRRegClass);
+      Register Sign = MRI.createVirtualRegister(&MtG::GRRegClass);
+      Register SMVal = MRI.createVirtualRegister(&MtG::GRRegClass);
+      SignMask = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), Threshold)
+          .addImm(0x7FFFFFFFL);
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::FLESS))
+          .addUse(ResultInit)
+          .addUse(Threshold);
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::SETF), Sign);
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), SMVal)
+          .addImm((int64_t)0x80000000LL);
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MULT), SignMask)
+          .addUse(Sign)
+          .addUse(SMVal);
+    }
+
+    // For SHL: prepare wrapping mask (2^32) via MOVEIMM_MACRO.
+    Register WrapMask;
+    if (Op == MtG::SHL_VAR_MACRO) {
+      WrapMask = MRI.createVirtualRegister(&MtG::GRRegClass);
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), WrapMask)
+          .addImm((int64_t)(1ULL << 32));
+    }
+
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::FISZERO)).addUse(CounterInit);
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::SETF), SkipCond);
+    BuildMI(*EntryMBB, MI, DL, TII.get(MtG::BRCOND_PSEUDO))
+        .addReg(SkipCond)
+        .addImm(0)
+        .addMBB(ExitMBB);
+
+    // ---- Loop block: shift by 1, decrement counter, loop back. ----
+    Register ResultPhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register CounterPhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register ResultNew = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register CounterNew = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register LoopCond = MRI.createVirtualRegister(&MtG::GRRegClass);
+
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI),
+            CounterPhi)
+        .addReg(CounterInit)
+        .addMBB(EntryMBB)
+        .addReg(CounterNew)
+        .addMBB(LoopMBB);
+    BuildMI(*LoopMBB, LoopMBB->begin(), DL, TII.get(TargetOpcode::PHI),
+            ResultPhi)
+        .addReg(ResultInit)
+        .addMBB(EntryMBB)
+        .addReg(ResultNew)
+        .addMBB(LoopMBB);
+
+    if (Op == MtG::SHL_VAR_MACRO) {
+      // result = (result + result) then wrap with SubCond to keep < 2^32.
+      Register Doubled = MRI.createVirtualRegister(&MtG::GRRegClass);
+      BuildMI(LoopMBB, DL, TII.get(MtG::ADD), Doubled)
+          .addUse(ResultPhi)
+          .addUse(ResultPhi);
+      BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), ResultNew)
+          .addUse(Doubled)
+          .addUse(WrapMask);
+    } else if (Op == MtG::SHR_VAR_MACRO) {
+      BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), ResultNew)
+          .addUse(ResultPhi);
+    } else {
+      // ASHR: halve then restore sign bit.
+      Register Halved = MRI.createVirtualRegister(&MtG::GRRegClass);
+      BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), Halved).addUse(ResultPhi);
+      BuildMI(LoopMBB, DL, TII.get(MtG::ADD), ResultNew)
+          .addUse(Halved)
+          .addUse(SignMask);
+    }
+
+    // Decrement counter.
+    BuildMI(LoopMBB, DL, TII.get(MtG::SUB1COND), CounterNew)
+        .addUse(CounterPhi);
+    // Loop back if counter is still > 0.
+    BuildMI(LoopMBB, DL, TII.get(MtG::FISZERO)).addUse(CounterNew);
+    BuildMI(LoopMBB, DL, TII.get(MtG::SETNF), LoopCond);
+    BuildMI(LoopMBB, DL, TII.get(MtG::BRCOND_PSEUDO))
+        .addReg(LoopCond)
+        .addImm(0)
+        .addMBB(LoopMBB);
+
+    // ---- Exit block: PHI selects between skipped (original) and shifted. ----
+    Register ExitPhi = MRI.createVirtualRegister(&MtG::GRRegClass);
+    BuildMI(*ExitMBB, ExitMBB->begin(), DL, TII.get(TargetOpcode::PHI),
+            ExitPhi)
+        .addReg(ResultInit)
+        .addMBB(EntryMBB)
+        .addReg(ResultNew)
+        .addMBB(LoopMBB);
+    BuildMI(*ExitMBB, std::next(ExitMBB->begin()), DL,
+            TII.get(TargetOpcode::COPY), DstReg)
+        .addReg(ExitPhi);
+
+    MI.eraseFromParent();
+    return ExitMBB;
+  }
   default:
     break;
   }
@@ -923,6 +1075,46 @@ SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
     return Base;
   return DAG.getNode(ISD::ADD, DL, PtrVT, Base,
                      DAG.getConstant(Offset, DL, PtrVT));
+}
+
+SDValue MtGTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MtGMachineFunctionInfo *FuncInfo = MF.getInfo<MtGMachineFunctionInfo>();
+
+  SDLoc DL(Op);
+  SDValue FI = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(),
+                                 getPointerTy(DAG.getDataLayout()));
+
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), DL, FI, Op.getOperand(1),
+                      MachinePointerInfo(SV));
+}
+
+SDValue MtGTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
+  SDNode *Node = Op.getNode();
+  EVT VT = Node->getValueType(0);
+  SDValue Chain = Node->getOperand(0);
+  SDValue VAListPtr = Node->getOperand(1);
+  const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
+  SDLoc DL(Node);
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+
+  SDValue VAList =
+      DAG.getLoad(PtrVT, DL, Chain, VAListPtr, MachinePointerInfo(SV));
+  Chain = VAList.getValue(1);
+
+  SDValue Result = DAG.getLoad(VT, DL, Chain, VAList, MachinePointerInfo());
+  Chain = Result.getValue(1);
+
+  unsigned ArgSize = VT.getStoreSize();
+  if (ArgSize < 4)
+    ArgSize = 4;
+  SDValue NextPtr =
+      DAG.getNode(ISD::ADD, DL, PtrVT, VAList,
+                  DAG.getIntPtrConstant(ArgSize, DL));
+  Chain = DAG.getStore(Chain, DL, NextPtr, VAListPtr, MachinePointerInfo(SV));
+
+  return DAG.getMergeValues({Result, Chain}, DL);
 }
 
 bool MtGTargetLowering::isLegalAddressingMode(const DataLayout &DL,

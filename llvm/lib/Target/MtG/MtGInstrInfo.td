@@ -158,6 +158,8 @@ let isCall = 1,
 
 def : Pat<(MtGCall (i32 tglobaladdr:$dst)),
           (CALL_PSEUDO tglobaladdr:$dst)>;
+def : Pat<(MtGCall (i32 texternalsym:$dst)),
+          (CALL_PSEUDO texternalsym:$dst)>;
 
 
 
@@ -226,6 +228,12 @@ let Constraints = "$src1 = $dst" in {
                     "SHR_MACRO\t $dst, $imm",[(set GR:$dst, (srl GR:$src1, mtgimm:$imm))]>;
     def ASHR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, mtgimm:$imm),
                     "ASHR_MACRO\t $dst, $imm",[(set GR:$dst, (sra GR:$src1, mtgimm:$imm))]>;
+    def SHL_VAR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "SHL_VAR_MACRO\t $dst, $src2",[(set GR:$dst, (shl GR:$src1, GR:$src2))]>;
+    def SHR_VAR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "SHR_VAR_MACRO\t $dst, $src2",[(set GR:$dst, (srl GR:$src1, GR:$src2))]>;
+    def ASHR_VAR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
+                    "ASHR_VAR_MACRO\t $dst, $src2",[(set GR:$dst, (sra GR:$src1, GR:$src2))]>;
     def NOT_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                     "NOT_MACRO\t $dst",[(set GR:$dst, (xor GR:$src1, -1))]>;
     def NEG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),

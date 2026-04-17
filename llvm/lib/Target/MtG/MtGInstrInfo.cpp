@@ -709,12 +709,10 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::RET_PSEUDO) {
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
-        .addImm(0)
-        .addImm(0);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
-        .addImm(0)
-        .addImm(0);
+    for (int i = 0; i < 4; ++i)
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD))
+          .addImm(0)
+          .addImm(0);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::RETURN));
     MI.eraseFromParent();
     return true;

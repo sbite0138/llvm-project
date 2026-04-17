@@ -69,12 +69,17 @@ bool MtGExpandBranchPseudo::expand(
     return LayoutPos.lookup(TargetMBB) > LayoutPos.lookup(&MBB);
   };
 
+  // Helper: emit 4 NumBuild placeholders (supports offsets up to 144^4 ≈ 429M).
+  auto EmitNumBuildPlaceholders = [&]() {
+    for (int i = 0; i < 4; ++i)
+      BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+  };
+
   if (Opc == MtG::BR_PSEUDO) {
     MachineBasicBlock *TargetMBB = MI.getOperand(0).getMBB();
     unsigned JumpOpc = isForwardTo(TargetMBB) ? MtG::JUMPFWD : MtG::JUMPBWD;
 
-    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
-    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    EmitNumBuildPlaceholders();
     BuildMI(MBB, MI, DL, TII.get(JumpOpc)).addMBB(TargetMBB);
     MI.eraseFromParent();
     return true;
@@ -95,22 +100,14 @@ bool MtGExpandBranchPseudo::expand(
       JumpOpc = IsForward ? MtG::JUMPFWDF : MtG::JUMPBWDF;
 
     BuildMI(MBB, MI, DL, TII.get(MtG::FISZERO)).addReg(CondReg);
-    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
-    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    EmitNumBuildPlaceholders();
     BuildMI(MBB, MI, DL, TII.get(JumpOpc)).addMBB(TargetMBB);
     MI.eraseFromParent();
     return true;
   }
 
   if (Opc == MtG::CALL_PSEUDO) {
-    // Rewrite CALL_PSEUDO into the concrete CallFwd instruction preceded
-    // by two NumBuild placeholders. ursa's fixup_jumps later flips the
-    // mnemonic to CallBwdR when the callee sits at a lower PC and fills
-    // in the NumBuild pair with the resolved displacement — same pattern
-    // as intra-function Jumps. Carry over the implicit-def / use operand
-    // list from the pseudo so regalloc liveness stays correct.
-    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
-    BuildMI(MBB, MI, DL, TII.get(MtG::NUMBUILD)).addImm(0).addImm(0);
+    EmitNumBuildPlaceholders();
     auto Call = BuildMI(MBB, MI, DL, TII.get(MtG::CALLFWD))
                     .add(MI.getOperand(0));
     for (const MachineOperand &MO : MI.implicit_operands())

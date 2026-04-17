@@ -86,27 +86,29 @@ static bool isJump(unsigned Opc, bool &IsForward) {
   }
 }
 
-// Patch the two NumBuild placeholders immediately preceding MI so that r0
-// evaluates to Value when MI executes. Returns true on success.
-static bool patchPrecedingNumBuildPair(MachineInstr &MI,
+// Patch the four NumBuild placeholders immediately preceding MI so that r0
+// evaluates to Value when MI executes. Encodes Value as 4 base-144 digits
+// (max 144^4 - 1 ≈ 429M). Returns true on success.
+static bool patchPrecedingNumBuildQuad(MachineInstr &MI,
                                        MachineBasicBlock &MBB, int64_t Value) {
   if (Value < 0) {
     errs() << "MtGBranchSelector: negative value " << Value
            << " for displacement placeholder: " << MI;
     return false;
   }
-  if (Value >= 144 * 144) {
-    // Exceeded the 2-digit NumBuild encoding range. Supporting longer
-    // displacements would require emitting more NumBuild digits, which
-    // in turn changes instruction counts and needs iteration to converge.
-    // Out of scope for now.
-    report_fatal_error("MtG branch/return displacement exceeds 2-digit "
-                       "NumBuild encoding; wider offsets are not yet "
-                       "supported");
+  constexpr int64_t MaxVal = (int64_t)144 * 144 * 144 * 144;
+  if (Value >= MaxVal) {
+    report_fatal_error("MtG branch/return displacement exceeds 4-digit "
+                       "NumBuild encoding");
   }
 
-  unsigned HighDigit = Value / 144;
-  unsigned LowDigit = Value % 144;
+  // Decompose into 4 base-144 digits: d0 (most significant) .. d3 (least).
+  unsigned Digits[4];
+  int64_t V = Value;
+  for (int i = 3; i >= 0; --i) {
+    Digits[i] = V % 144;
+    V /= 144;
+  }
 
   auto StepBackToCounted = [](MachineBasicBlock::iterator It,
                               MachineBasicBlock::iterator Begin)
@@ -119,21 +121,23 @@ static bool patchPrecedingNumBuildPair(MachineInstr &MI,
     return Begin;
   };
 
-  auto MBBBegin = MBB.begin();
-  auto It = MI.getIterator();
-  if (It == MBBBegin)
-    return false;
-  auto NB2It = StepBackToCounted(It, MBBBegin);
-  if (NB2It == MBBBegin || NB2It->getOpcode() != MtG::NUMBUILD)
-    return false;
-  auto NB1It = StepBackToCounted(NB2It, MBBBegin);
-  if (NB1It == NB2It || NB1It->getOpcode() != MtG::NUMBUILD)
-    return false;
+  // Walk back to find 4 NumBuild instructions.
+  MachineBasicBlock::iterator MBBBegin = MBB.begin();
+  MachineBasicBlock::iterator NBIts[4];
+  MachineBasicBlock::iterator It = MI.getIterator();
+  for (int i = 3; i >= 0; --i) {
+    if (It == MBBBegin)
+      return false;
+    NBIts[i] = StepBackToCounted(It, MBBBegin);
+    if (NBIts[i]->getOpcode() != MtG::NUMBUILD)
+      return false;
+    It = NBIts[i];
+  }
 
-  NB1It->getOperand(0).setImm(HighDigit / 12);
-  NB1It->getOperand(1).setImm(HighDigit % 12);
-  NB2It->getOperand(0).setImm(LowDigit / 12);
-  NB2It->getOperand(1).setImm(LowDigit % 12);
+  for (int i = 0; i < 4; ++i) {
+    NBIts[i]->getOperand(0).setImm(Digits[i] / 12);
+    NBIts[i]->getOperand(1).setImm(Digits[i] % 12);
+  }
   return true;
 }
 
@@ -175,7 +179,7 @@ bool MtGBSel::runOnMachineFunction(MachineFunction &MF) {
         else
           Z = (int64_t)(JumpPos + 1) - (int64_t)TargetPos;
 
-        if (patchPrecedingNumBuildPair(MI, MBB, Z)) {
+        if (patchPrecedingNumBuildQuad(MI, MBB, Z)) {
           ++NumPatched;
           Changed = true;
         }
@@ -185,7 +189,7 @@ bool MtGBSel::runOnMachineFunction(MachineFunction &MF) {
         // count from the function entry (position 0) to this Return's
         // position. That's exactly InstrPos[MI].
         unsigned RetPos = InstrPos.lookup(&MI);
-        if (patchPrecedingNumBuildPair(MI, MBB, (int64_t)RetPos)) {
+        if (patchPrecedingNumBuildQuad(MI, MBB, (int64_t)RetPos)) {
           ++NumPatched;
           Changed = true;
         }

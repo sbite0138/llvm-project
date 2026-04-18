@@ -298,7 +298,11 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     expandPostRAPseudo(*NumBuildMI);
     return true;
   } else if (MI.getOpcode() == MtG::SHL_MACRO) {
-    // "$dst = SHL_MACRO $dst, imm"  →  $dst = $dst * 2^imm (mod 2^32).
+    // "$dst = SHL_MACRO $dst, imm"  →  $dst = ($dst * 2^imm) mod 2^32.
+    // MtG's MULT doesn't wrap (ursa keeps arbitrary precision), so after
+    // multiplying we REM by 2^32 to enforce 32-bit semantics. Without the
+    // REM the out-of-range value leaks through ORs/switches and corrupts
+    // LLVM's rotate-based lookup-table dispatch.
     auto DstReg = MI.getOperand(0).getReg();
     int64_t Imm = MI.getOperand(2).getImm();
     std::set<Register> UseRegs = {MtG::R0};
@@ -314,8 +318,18 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
             .addUse(DstReg)
             .addUse(MtG::R0);
     MultMI->setFlag(MachineInstr::NoMerge);
+    // Enforce 32-bit wrapping via REM_MACRO DstReg, 2^32.
+    auto NumBuildWrapMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1LL << 32);
+    auto RemMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
     MI.eraseFromParent();
     expandPostRAPseudo(*NumBuildMI);
+    expandPostRAPseudo(*NumBuildWrapMI);
+    expandPostRAPseudo(*RemMI);
     return true;
   } else if (MI.getOpcode() == MtG::NEG_MACRO) {
     // "$dst = NEG_MACRO $dst"  (src1 is tied to dst by the .td Constraint)

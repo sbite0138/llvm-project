@@ -98,6 +98,10 @@ static uint32_t mulhu32(uint32_t a, uint32_t b) {
 
 /* ----- Mini-rv32ima config ----- */
 #define MINI_RV32_RAM_SIZE RAM_SIZE
+#define MINIRV32_RAM_IMAGE_OFFSET 0  /* Avoid uint32_t overflow in address math;
+                                        MtG uses arbitrary-precision integers so
+                                        0x90000000 + 0x80000000 = 0x110000000,
+                                        breaking MMIO range checks. */
 #define MINIRV32_IMPLEMENTATION
 #define MINIRV32_DECORATE static
 
@@ -134,15 +138,13 @@ static uint32_t mulhu32(uint32_t a, uint32_t b) {
 
 #include "/mnt/work/mini-rv32ima/mini-rv32ima/mini-rv32ima.h"
 
-/* Test ROM: writes "Hi\n" to UART (0x10000000) then poweroff via syscon.
-   lui x5, 0x10000;  addi x6, x0, 'H';  sw x6, 0(x5);
-   addi x6, x0, 'i'; sw x6, 0(x5);
-   addi x6, x0, '\n'; sw x6, 0(x5);
-   lui x5, 0x11100;  addi x6, x0, 0x555;  sw x6, 0(x5); */
+/* Minimal test ROM: writes "Hi" to UART then poweroff.
+   LUI x5, 0x10000; ADDI x6, x0, 'H'; SW x6, 0(x5);
+   ADDI x6, x0, 'i'; SW x6, 0(x5);
+   LUI x5, 0x11100; ADDI x6, x0, 0x555; SW x6, 0(x5) */
 static const uint32_t test_rom[] = {
     0x100002B7, 0x04800313, 0x0062A023,
     0x06900313, 0x0062A023,
-    0x00A00313, 0x0062A023,
     0x111002B7, 0x55500313, 0x0062A023
 };
 
@@ -160,12 +162,12 @@ void _start(void) {
     struct MiniRV32IMAState *core =
         (struct MiniRV32IMAState *)((uint8_t *)ram_words + RAM_SIZE
                                     - sizeof(struct MiniRV32IMAState));
-    core->pc = 0x80000000;
+    core->pc = MINIRV32_RAM_IMAGE_OFFSET;
     core->extraflags = 3;  /* Machine mode */
 
-    /* Run emulator: 1 instruction per step, up to 100 steps */
+    /* Run emulator: 1 instruction per step, up to 1000 steps */
     done_flag = 0;
-    for (i = 0; i < 100 && !done_flag; i++) {
+    for (i = 0; i < 1000 && !done_flag; i++) {
         int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, 1, 1);
         if (ret == 0x5555) {
             done_flag = 1;

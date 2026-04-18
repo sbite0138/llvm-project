@@ -225,6 +225,10 @@ let Constraints = "$src1 = $dst" in {
                     "SHL_MACRO\t $dst, $imm",[(set GR:$dst, (shl GR:$src1, mtgimm:$imm))]>;
     def SHR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, mtgimm:$imm),
                     "SHR_MACRO\t $dst, $imm",[(set GR:$dst, (srl GR:$src1, mtgimm:$imm))]>;
+    // ASHR_MACRO's expansion additionally clobbers R3 and R4 as a scratch
+    // register (SignReg holds the sign bit and mask). Override Defs so the
+    // register allocator doesn't place live values in R3/R4 across it.
+    let Defs = [R0, R6, R3, R4] in
     def ASHR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, mtgimm:$imm),
                     "ASHR_MACRO\t $dst, $imm",[(set GR:$dst, (sra GR:$src1, mtgimm:$imm))]>;
     def SHL_VAR_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),

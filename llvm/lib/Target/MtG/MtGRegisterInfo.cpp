@@ -323,16 +323,20 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MBB.insert(II, AddMI);
     }
 
+    // Mark TmpReg as killed: the emergency path reloads the victim
+    // afterwards (so whatever's in TmpReg gets overwritten), and the
+    // non-emergency path picked a scratch whose value was dead by design.
+    // Without this kill flag, STOREBYTEWISE_MACRO's own expansion may
+    // trigger a NESTED emergency save to the same slot (slot 0), clobbering
+    // the outer save and leaving the victim reloaded with stale data.
     if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
-      // Carry over $val's kill flag so STOREBYTEWISE_MACRO's expansion
-      // can use it in place when it's the last read.
       bool ValKilled = MI.getOperand(0).isKill();
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STOREBYTEWISE_MACRO))
                          .addReg(OpReg, getKillRegState(ValKilled))
-                         .addUse(TmpReg));
+                         .addReg(TmpReg, RegState::Kill));
     } else {
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)
-                         .addUse(TmpReg));
+                         .addReg(TmpReg, RegState::Kill));
     }
 
     if (NeedEmergency) {

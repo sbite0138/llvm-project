@@ -478,8 +478,12 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       // Prefer free regs, fall back to eviction for Idx == last needed.
       if (Idx < Free.size())
         return Free[Idx];
-      if (Candidates.size() > Free.size())
-        return Candidates[Free.size()]; // first non-free
+      // Find the first non-free candidate (one that's in Candidates but
+      // not in Free). Free preserves Candidates order, so a non-free
+      // register appears at a Candidate position where Free has a gap.
+      for (Register R : Candidates)
+        if (!LivePhys.available(MRI_, R))
+          return R;
       return Register();
     };
 
@@ -494,7 +498,12 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       unsigned Next = 0;
       if (!AddrKilled) IterAddrReg = pickOne(Next++);
       if (!ValKilled)  ByteWorkReg = pickOne(Next++);
-      Victim = Next == 2 ? ByteWorkReg : IterAddrReg;
+      // The Victim is whichever of the chosen regs is non-free (exactly one
+      // should be, since Free.size() = NumScratchesNeeded - 1).
+      if (IterAddrReg.isValid() && !LivePhys.available(MRI_, IterAddrReg))
+        Victim = IterAddrReg;
+      else if (ByteWorkReg.isValid() && !LivePhys.available(MRI_, ByteWorkReg))
+        Victim = ByteWorkReg;
       assert(Victim.isValid() && !LivePhys.available(MRI_, Victim));
     } else if (Candidates.size() >= NumScratchesNeeded) {
       // Need to evict two candidates via emergency slots 0 and 1.

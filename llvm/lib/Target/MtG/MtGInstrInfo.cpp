@@ -338,6 +338,26 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     expandPostRAPseudo(*NumBuildMI);
     return true;
+  } else if (MI.getOpcode() == MtG::NOT_MACRO) {
+    // NOT(x) = 0xFFFFFFFF - x. Defs=[R0,R6] so R6 is safe as scratch.
+    //   R0 = 0xFFFFFFFF         (NUMBUILD_MACRO)
+    //   R6 = R0                 (MOVE)
+    //   SubCond R6, dst         (R6 = 0xFFFFFFFF - dst)
+    //   dst = R6                (MOVE)
+    auto DstReg = MI.getOperand(0).getReg();
+    assert(DstReg != MtG::R0 && DstReg != MtG::R6 &&
+           "NOT_MACRO dst conflicts with scratch R0/R6");
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm((int64_t)0xFFFFFFFFLL);
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, MtG::R6, MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUBCOND), MtG::R6)
+        .addUse(MtG::R6)
+        .addUse(DstReg);
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, DstReg, MtG::R6);
+    MI.eraseFromParent();
+    expandPostRAPseudo(*NumBuildMI);
+    return true;
   } else if (MI.getOpcode() == MtG::SUB_MACRO) {
 
     auto DstReg = MI.getOperand(0).getReg();

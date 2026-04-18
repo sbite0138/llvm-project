@@ -86,12 +86,16 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   //     holds the byte value in [0, 2^N) range.
   //   - sextload i8/i16 → expand via `(x << (32-N)) >>s (32-N)` so the
   //     existing SHL_MACRO / ASHR_MACRO sign-fill the top bits.
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i1, Promote);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i8, Expand);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Expand);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i1, Promote);
   setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i8, Legal);
   setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Legal);
+  setLoadExtAction(ISD::EXTLOAD, MVT::i32, MVT::i1, Promote);
   setLoadExtAction(ISD::EXTLOAD, MVT::i32, MVT::i8, Legal);
   setLoadExtAction(ISD::EXTLOAD, MVT::i32, MVT::i16, Legal);
+  setTruncStoreAction(MVT::i32, MVT::i1, Expand);
   setTruncStoreAction(MVT::i32, MVT::i8, Legal);
   setTruncStoreAction(MVT::i32, MVT::i16, Legal);
 
@@ -101,6 +105,8 @@ MtGTargetLowering::MtGTargetLowering(const TargetMachine &TM,
   // explicitly so the legalizer doesn't fall through to "can't select".
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
+  setOperationAction(ISD::ROTL, MVT::i32, Expand);
+  setOperationAction(ISD::ROTR, MVT::i32, Expand);
 
   computeRegisterProperties(STI.getRegisterInfo());
 }

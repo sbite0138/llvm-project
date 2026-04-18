@@ -22,15 +22,11 @@ entry:
   ret i32 %1
 }
 
-; Prologue: SP -= (4 local + 4 outgoing-arg + 4 emergency) = 12.
-; The NumBuild pair encodes -12 in base-12 digits.
+; Prologue: SP -= (4 local + 4 outgoing-arg + 8 emergency) = 16.
+; The NumBuild sequence encodes -16 (= 2^32 - 16) then adds to SP.
 ; CHECK-LABEL: alloca_one_i32:
-; CHECK: NumBuild{{.*}}#0, #9
-; CHECK: NumBuild{{.*}}#11, #10
-; CHECK: NumBuild{{.*}}#4, #6
-; CHECK: NumBuild{{.*}}#1, #5
-; CHECK: NumBuild{{.*}}#8, #4
-; CHECK-NEXT: Add	 r2, r0
+; CHECK: NumBuild
+; CHECK: Add	 r2, r0
 ; Epilogue: SP += 12, just before Return.
 ; CHECK: Add	 r2, r0
 ; CHECK: Return

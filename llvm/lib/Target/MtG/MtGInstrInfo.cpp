@@ -483,31 +483,50 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       return Register();
     };
 
+    Register Victim2;
     if (Free.size() >= NumScratchesNeeded) {
       unsigned Next = 0;
       if (!AddrKilled) IterAddrReg = pickOne(Next++);
       if (!ValKilled)  ByteWorkReg = pickOne(Next++);
     } else if (Free.size() + 1 >= NumScratchesNeeded &&
                Candidates.size() >= NumScratchesNeeded) {
-      // Evict exactly one candidate; that register becomes the Victim.
+      // Evict exactly one candidate via emergency slot 0.
       unsigned Next = 0;
       if (!AddrKilled) IterAddrReg = pickOne(Next++);
       if (!ValKilled)  ByteWorkReg = pickOne(Next++);
-      // The last pickOne() will have returned the Victim (first non-free).
       Victim = Next == 2 ? ByteWorkReg : IterAddrReg;
       assert(Victim.isValid() && !LivePhys.available(MRI_, Victim));
+    } else if (Candidates.size() >= NumScratchesNeeded) {
+      // Need to evict two candidates via emergency slots 0 and 1.
+      unsigned Next = 0;
+      if (!AddrKilled) {
+        IterAddrReg = Candidates[Next++];
+        if (!LivePhys.available(MRI_, IterAddrReg))
+          Victim = IterAddrReg;
+      }
+      if (!ValKilled) {
+        ByteWorkReg = Candidates[Next++];
+        if (!LivePhys.available(MRI_, ByteWorkReg)) {
+          if (Victim.isValid())
+            Victim2 = ByteWorkReg;
+          else
+            Victim = ByteWorkReg;
+        }
+      }
     } else {
       report_fatal_error("MtG: STOREBYTEWISE_MACRO cannot satisfy its "
-                         "scratch-register needs; no free allocatable "
-                         "register is available and we can only evict one "
-                         "through the emergency slot");
+                         "scratch-register needs; not enough candidate "
+                         "registers available");
     }
-    if (ValKilled)  ByteWorkReg = ValReg;  // in-place destruction
+    if (ValKilled)  ByteWorkReg = ValReg;
     if (AddrKilled) IterAddrReg = AddrReg;
 
     if (Victim.isValid())
       MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
-                                         MI.getIterator(), TII, Victim);
+                                         MI.getIterator(), TII, Victim, 0);
+    if (Victim2.isValid())
+      MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
+                                         MI.getIterator(), TII, Victim2, 1);
 
     if (!AddrKilled)
       BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
@@ -534,9 +553,14 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
 
     expandPostRAPseudo(*NumBuildMI);
+    if (Victim2.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII,
+          Victim2, 1);
     if (Victim.isValid())
       MtGRegisterInfo::emitEmergencyReload(
-          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII, Victim);
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII,
+          Victim, 0);
     MI.eraseFromParent();
     return true;
   } else if (MI.getOpcode() == MtG::LOADBYTEWISE_MACRO) {

@@ -25,11 +25,11 @@ class MtGRegisterInfo;
 class MtGFrameLowering : public TargetFrameLowering {
 protected:
 public:
-  // Number of bytes reserved at *SP for the scavenger's emergency-spill
-  // slot. See MtGRegisterInfo::eliminateFrameIndex / emitEmergencySave for
-  // why this lives at SP+0..SP+3 specifically (no scratch is required to
-  // address it that way).
-  static constexpr int64_t kEmergencySlotSize = 4;
+  // Number of bytes reserved at *SP for emergency-spill slots.
+  // Slot 0 = SP+0..SP+3, Slot 1 = SP+4..SP+7.
+  // Two slots allow STOREBYTEWISE_MACRO to evict two live registers
+  // when no free allocatable register is available.
+  static constexpr int64_t kEmergencySlotSize = 8;
 
   MtGFrameLowering(const MtGSubtarget &STI);
 

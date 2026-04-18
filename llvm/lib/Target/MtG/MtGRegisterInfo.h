@@ -64,11 +64,13 @@ public:
   static void emitEmergencySave(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator II,
                                 const TargetInstrInfo &TII,
-                                Register VictimReg);
+                                Register VictimReg,
+                                unsigned Slot = 0);
   static void emitEmergencyReload(MachineBasicBlock &MBB,
                                   MachineBasicBlock::iterator II,
                                   const TargetInstrInfo &TII,
-                                  Register VictimReg);
+                                  Register VictimReg,
+                                  unsigned Slot = 0);
 };
 
 } // end namespace llvm

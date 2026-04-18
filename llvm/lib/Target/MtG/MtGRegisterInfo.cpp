@@ -72,25 +72,25 @@ static void narrowAddMacroClobbers(MachineInstr &MI) {
 void MtGRegisterInfo::emitEmergencySave(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator II,
                                         const TargetInstrInfo &TII,
-                                        Register VictimReg) {
+                                        Register VictimReg,
+                                        unsigned Slot) {
   DebugLoc DL = II != MBB.end() ? II->getDebugLoc() : DebugLoc();
+  // Slot 1 is at SP+4; advance SP to reach it.
+  if (Slot == 1)
+    for (int i = 0; i < 4; ++i)
+      BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
   // R0 = 256
   BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
   for (int i = 0; i < 4; ++i) {
-    // VictimReg = VictimReg % 256 (low byte); R6 = VictimReg / 256 (upper).
     BuildMI(MBB, II, DL, TII.get(MtG::DIVIDE), VictimReg).addUse(VictimReg);
-    // *SP = low byte. Store is spec-ordered (Y=value, Z=address): first
-    // operand is the byte to write, second is where to write it.
     BuildMI(MBB, II, DL, TII.get(MtG::STORE)).addUse(VictimReg).addUse(MtG::R2);
     if (i < 3) {
-      // VictimReg <- upper bytes for the next iteration.
       BuildMI(MBB, II, DL, TII.get(MtG::MOVE), VictimReg).addUse(MtG::R6);
-      // SP++ : address advances to the next byte slot.
       BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
     }
   }
-  // Restore SP (we incremented it 3 times).
-  for (int i = 0; i < 3; ++i)
+  // Restore SP: undo 3 loop ADD1s + 4 if Slot 1.
+  for (int i = 0; i < 3 + (Slot == 1 ? 4 : 0); ++i)
     BuildMI(MBB, II, DL, TII.get(MtG::SUB1COND), MtG::R2).addUse(MtG::R2);
 }
 
@@ -107,10 +107,11 @@ void MtGRegisterInfo::emitEmergencySave(MachineBasicBlock &MBB,
 void MtGRegisterInfo::emitEmergencyReload(MachineBasicBlock &MBB,
                                           MachineBasicBlock::iterator II,
                                           const TargetInstrInfo &TII,
-                                          Register VictimReg) {
+                                          Register VictimReg,
+                                          unsigned Slot) {
   DebugLoc DL = II != MBB.end() ? II->getDebugLoc() : DebugLoc();
-  // SP += 3 : start at the high-byte slot (SP+3).
-  for (int i = 0; i < 3; ++i)
+  // SP += 3 (+ 4 if Slot 1) : start at the high-byte slot.
+  for (int i = 0; i < 3 + (Slot == 1 ? 4 : 0); ++i)
     BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
   // R0 = 256
   BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
@@ -130,7 +131,11 @@ void MtGRegisterInfo::emitEmergencyReload(MachineBasicBlock &MBB,
         .addUse(VictimReg)
         .addUse(MtG::R6);
   }
-  // SP is now back at its original position (3 ADD1's matched by 3 SUB1COND's).
+  // SP is now back at slot base (3 ADD1's matched by 3 SUB1COND's in the loop).
+  // If Slot 1, undo the extra 4 ADD1s to restore SP to its original position.
+  if (Slot == 1)
+    for (int i = 0; i < 4; ++i)
+      BuildMI(MBB, II, DL, TII.get(MtG::SUB1COND), MtG::R2).addUse(MtG::R2);
 }
 
 const MCPhysReg *

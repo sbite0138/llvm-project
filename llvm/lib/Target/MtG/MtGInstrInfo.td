@@ -193,16 +193,15 @@ def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, mtgimm:$imm),
 def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                 "MOVREG_MACRO\t $dst, $src1",[]>;
 
-let usesCustomInserter = 1, Defs = [R0, R1, R2, R3, R4, R5, R6, R7] in {
+// MOVEIMM / MOVEADDR only clobber R0 (NumBuild accumulates there).
+let Defs = [R0] in {
 def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
                   "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
-// Materialise the address of a global symbol into a register. Expanded by
-// expandPostRAPseudo into "NumBuildAddr <sym>; Move $dst, r0", where
-// NumBuildAddr is a meta-instruction the ursa assembler resolves by
-// looking up the symbol's allocated address and emitting the
-// corresponding 4 NumBuild digit pairs.
 def MOVEADDR_MACRO : Pseudo<(outs GR:$dst), (ins calltarget:$sym),
                     "MOVEADDR_MACRO\t $dst, $sym",[]>;
+}
+
+let usesCustomInserter = 1, Defs = [R0, R6] in {
 let Constraints = "$src1 = $dst" in {
     def ADD_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1, GR:$src2),
                     "ADD_MACRO\t $dst, $src2",[(set GR:$dst, (add GR:$src1, GR:$src2))]>;

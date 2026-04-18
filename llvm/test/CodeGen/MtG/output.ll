@@ -5,13 +5,12 @@
 ; external `Call $__mtg_output` appears).
 declare void @__mtg_output(i32)
 
-; Constant arguments are materialized via NumBuild/Move into R8 and then
-; emitted.
+; Constant arguments are materialized via NumBuild/Move and then emitted.
 define void @emit_const() nounwind {
 ; CHECK-LABEL: emit_const:
 ; CHECK: NumBuild
-; CHECK: Move	 r8,
-; CHECK-NEXT: Output	 r8
+; CHECK: Move
+; CHECK: Output	 r{{[0-9]+}}
 ; CHECK-NOT: Call $__mtg_output
 ; CHECK: Return
   call void @__mtg_output(i32 72)

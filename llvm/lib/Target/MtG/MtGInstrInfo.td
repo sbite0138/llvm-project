@@ -194,7 +194,22 @@ def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
                 "MOVREG_MACRO\t $dst, $src1",[]>;
 
 // MOVEIMM / MOVEADDR only clobber R0 (NumBuild accumulates there).
+// MOVEIMM_MACRO is marked "as cheap as a move" so MachineCSE refuses to
+// extend a constant's live range across basic blocks (heuristic #1 in
+// MachineCSE::isProfitableToCSE). MtG only has 8 allocatable GPRs and
+// every spill goes through the bytewise FI-macro chain (~30 instructions
+// + dynamic scratches), so re-emitting MOVEIMM at each use is genuinely
+// cheaper than the spill/reload it would otherwise force. Without this
+// flag, MachineCSE consolidates duplicate constants into long-lived vregs
+// that overflow the register file — the resulting RA spills exposed a
+// latent FI-elimination corner case where Phase-1's TmpReg and Phase-2's
+// ByteWorkReg interact with the single emergency-spill slot, silently
+// clobbering the SW handler's rdid so HandleControlStore is never reached.
+// NOTE: this flag mitigates the trigger (heavy CSE-induced pressure) but
+// does NOT fix the underlying FI-macro design. See Epic 1c handoff memo
+// for the proper fix options.
 let Defs = [R0] in {
+let isAsCheapAsAMove = 1 in
 def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),
                   "MOVIMM_MACRO\t $dst, $imm",[(set GR:$dst, mtgimm:$imm)]>;
 def MOVEADDR_MACRO : Pseudo<(outs GR:$dst), (ins calltarget:$sym),

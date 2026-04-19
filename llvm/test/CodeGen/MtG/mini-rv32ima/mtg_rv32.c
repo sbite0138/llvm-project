@@ -11,7 +11,11 @@
  *   build/bin/clang --target=mtg -O1 -nostdlib -ffreestanding -S \
  *       llvm/test/CodeGen/MtG/mini-rv32ima/mtg_rv32.c -o /tmp/t.s \
  *       -I build/lib/clang/23/include
- *   (cd ursa && python3 src/main.py /tmp/t.s)  # expect ...*LM
+ *   python3 ursa/tools/mtg-link.py /tmp/t.s -o /tmp/linked.s
+ *   python3 ursa/src/main.py /tmp/linked.s   # expect ...*LM
+ *
+ * (The mtg-link.py step resolves NumBuildAddr into concrete NumBuild
+ *  digit pairs; ursa no longer accepts that pseudo directly.)
  *
  * When we have time: add an %ursa substitution in lit config gated on
  * a feature flag (e.g. only active when URSA_PATH env var is set) and

@@ -1,4 +1,23 @@
-/* MtG freestanding harness for mini-rv32ima. */
+/* MtG freestanding harness for mini-rv32ima.
+ *
+ * TODO: wire this into lit properly. This file is the end-to-end
+ * mini-rv32ima test — it has to be compiled with clang --target=mtg,
+ * then executed on the ursa simulator (separate repo) and the stdout
+ * checked against "*A*B*C*D*E*F*G*H*IJK*LM". That doesn't fit lit's
+ * FileCheck workflow, and the ursa path is machine-dependent, so for
+ * now the sibling lit.local.cfg excludes this file from test discovery
+ * and we invoke it manually:
+ *
+ *   build/bin/clang --target=mtg -O1 -nostdlib -ffreestanding -S \
+ *       llvm/test/CodeGen/MtG/mini-rv32ima/mtg_rv32.c -o /tmp/t.s \
+ *       -I build/lib/clang/23/include
+ *   (cd ursa && python3 src/main.py /tmp/t.s)  # expect ...*LM
+ *
+ * When we have time: add an %ursa substitution in lit config gated on
+ * a feature flag (e.g. only active when URSA_PATH env var is set) and
+ * re-enable discovery by dropping this file from lit.local.cfg's
+ * excludes list.
+ */
 #include <mtg.h>
 
 typedef unsigned int   uint32_t;

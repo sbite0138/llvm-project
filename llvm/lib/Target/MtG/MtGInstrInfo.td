@@ -202,9 +202,10 @@ def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
 // cheaper than the spill/reload it would otherwise force — an honest
 // cost-model input rather than a workaround. (The separate correctness
 // hazard where a > 32-bit constant such as 2^32 was being held in a
-// spillable vreg is fixed at its source: LT/GT/LE/GE_MACRO now keeps
-// 2^32 in R0 and SHL_VAR_MACRO avoids 2^32 entirely by peeling bit 31
-// before doubling — see MtGISelLowering.cpp.)
+// spillable vreg is fixed at its source: LT/GT/LE/GE_MACRO and
+// SHL_VAR_MACRO both avoid 2^32 entirely by peeling bit 31 via
+// SubCond(val, 2^31) so every intermediate fits in a 32-bit spill
+// slot — see MtGISelLowering.cpp.)
 let Defs = [R0] in {
 let isAsCheapAsAMove = 1 in
 def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),

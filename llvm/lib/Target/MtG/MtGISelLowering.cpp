@@ -837,32 +837,58 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     Register SrcReg1 = MI.getOperand(1).getReg();
     Register SrcReg2 = MI.getOperand(2).getReg();
 
-    // Bias both operands: B = (val + 0x80000000) mod 2^32.
-    // We ADD 0x80000000 then SubCond with 2^32 to wrap. Bias (0x80000000)
-    // fits in a 32-bit spill slot and is safe to hold in a vreg that may
-    // be CSE'd / spilled. Wrap (2^32) does NOT fit in a 32-bit spill slot:
-    // STOREBYTEWISE truncates to 4 bytes, so a spilled Wrap reloads as 0
-    // and SUBCOND becomes a silent no-op. To keep Wrap off the spill path
-    // we materialize it straight into R0 (reserved; never allocated and
-    // never spilled) via NUMBUILD_MACRO and use R0 as rY in SUBCOND.
+    // Bias both operands: B = (src + 2^31) mod 2^32 = src XOR 2^31 (flip
+    // bit 31). Signed compare on the two B values is equivalent to signed
+    // compare on src1/src2 since FLess is unsigned.
+    //
+    // A straightforward "ADD by 2^31 then SubCond by 2^32 to wrap" would
+    // need 2^32 in a vreg, and 2^32 does not fit in a 32-bit spill slot
+    // (STOREBYTEWISE truncates to 4 bytes → reload of 0 → SubCond becomes
+    // a silent no-op). We instead peel bit 31 off each source using
+    // 2^31 only, and add 2^31 back only when bit 31 was originally 0.
+    // Every intermediate fits in [0, 2^32-1], so any spill is safe.
+    //
+    //   Peeled = SubCond(src, 2^31)   // FLAG = 1 iff src < 2^31 (bit31 clear)
+    //   NotBit31 = SetF               // 1 if bit31 was 0, else 0
+    //   Delta = NotBit31 * 2^31       // 0 or 2^31
+    //   B = Peeled + Delta            // = src XOR 2^31
+    //
+    // Trace:
+    //   bit31 set  (src >= 2^31): Peeled=src-2^31, Delta=0.   B=src-2^31. ✓
+    //   bit31 clear (src < 2^31): Peeled=src,      Delta=2^31. B=src+2^31. ✓
+    //
+    // ADD and MULT don't touch FLAG (verified against td and ursa), so
+    // the SubCond → SetF pair stays correctly paired under scheduling —
+    // SetF's Uses=[FLAG] forces it to follow the nearest preceding FLAG
+    // definer.
     Register Bias = MRI.createVirtualRegister(&MtG::GRRegClass);
-    Register S1 = MRI.createVirtualRegister(&MtG::GRRegClass);
-    Register S2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Peeled1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register NotBit31_1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Delta1 = MRI.createVirtualRegister(&MtG::GRRegClass);
     Register B1 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Peeled2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register NotBit31_2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+    Register Delta2 = MRI.createVirtualRegister(&MtG::GRRegClass);
     Register B2 = MRI.createVirtualRegister(&MtG::GRRegClass);
+
     BuildMI(*MBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), Bias)
         .addImm((int64_t)0x80000000LL);
-    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), S1)
+    // src1 → B1
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), Peeled1)
         .addUse(SrcReg1).addUse(Bias);
-    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), S2)
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SETF), NotBit31_1);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MULT), Delta1)
+        .addUse(NotBit31_1).addUse(Bias);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), B1)
+        .addUse(Peeled1).addUse(Delta1);
+    // src2 → B2
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), Peeled2)
         .addUse(SrcReg2).addUse(Bias);
-    // R0 = 2^32 via NUMBUILD_MACRO (never spilled — R0 is reserved).
-    BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
-        .addImm((int64_t)(1ULL << 32));
-    BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), B1)
-        .addUse(S1).addUse(MtG::R0);
-    BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), B2)
-        .addUse(S2).addUse(MtG::R0);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::SETF), NotBit31_2);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::MULT), Delta2)
+        .addUse(NotBit31_2).addUse(Bias);
+    BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), B2)
+        .addUse(Peeled2).addUse(Delta2);
 
     if (Op == MtG::LT_MACRO) {
       BuildMI(*MBB, MI, DL, TII.get(MtG::FLESS))

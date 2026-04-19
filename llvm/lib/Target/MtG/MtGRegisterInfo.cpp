@@ -252,22 +252,29 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     return true;
   } else if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO ||
              MI.getOpcode() == MtG::LOADBYTEWISE_FI_MACRO) {
+    // Monolithic FI expansion: produce the full byte-wise sequence in one
+    // place rather than leaving an intermediate STOREBYTEWISE_MACRO /
+    // LOADBYTEWISE_MACRO for later expansion. This lets us coordinate the
+    // address-computation scratch (TmpReg) and the byte-loop scratch
+    // (ByteWorkReg) with a single LivePhysRegs analysis and a single
+    // emergency-slot bookkeeping. Previously the two phases each picked
+    // independently and could collide on emergency slot 0 when both
+    // needed eviction (commit 976d3c63c179 partially mitigated one such
+    // case via a kill flag on the inserted intermediate, but the
+    // underlying design still had the gap).
+    //
+    // What we need:
+    //   * STORE: TmpReg (= IterAddrReg, holds FP+offset; killed by loop)
+    //            ByteWorkReg (= OpReg if OpReg killed; else separate so
+    //            the spilled value survives the divide-by-256 chain)
+    //   * LOAD : TmpReg (= IterAddrReg). OpReg is the destination
+    //            accumulator — no separate ByteWorkReg.
+    const bool IsStore = MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO;
     const auto OpReg = MI.getOperand(0).getReg();
     const auto FrameIndex = MI.getOperand(1).getIndex();
     const int64_t totalOffset = computeFIOffset(FrameIndex, /*ExtraOffset=*/0);
+    const bool OpKilled = IsStore && MI.getOperand(0).isKill();
 
-    // We need a scratch register to compute the address (FP + offset). MtG
-    // has no base+offset store, so the scratch is mandatory; the trailing
-    // STOREBYTEWISE / LOADBYTEWISE will then take that scratch as its
-    // address operand.
-    //
-    // Liveness analysis (LivePhysRegs walked backwards through MBB to MI)
-    // tells us which physical registers carry a value at this point. We
-    // pick the first allocatable register that's both *not live in* to MI
-    // and *not equal to OpReg* — OpReg's live value is still needed here
-    // (we're either about to store from it or, for the load-FI case, the
-    // pseudo will produce its new value via the LOADBYTEWISE expansion
-    // and we mustn't trash it before that).
     LivePhysRegs LivePhys(*this);
     LivePhys.addLiveOuts(MBB);
     for (auto It = MBB.rbegin(); It != MBB.rend(); ++It) {
@@ -279,42 +286,76 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     static const Register Candidates[] = {MtG::R1, MtG::R3, MtG::R4, MtG::R5,
                                           MtG::R7, MtG::R8, MtG::R9, MtG::R10,
                                           MtG::R11};
-    Register TmpReg;
+    SmallVector<Register, 9> Free;
     for (Register R : Candidates) {
       if (R == OpReg)
         continue;
-      if (LivePhys.available(MF.getRegInfo(), R)) {
-        TmpReg = R;
-        break;
-      }
+      if (LivePhys.available(MF.getRegInfo(), R))
+        Free.push_back(R);
     }
 
-    bool NeedEmergency = !TmpReg.isValid();
-    Register VictimReg;
-    if (NeedEmergency) {
-      // Every allocatable register at this point is either live or equal to
-      // OpReg. Pick a victim (any allocatable register != OpReg), save its
-      // value to the emergency slot at *SP via the byte-wise FP-trick, then
-      // use the victim as our scratch. We'll reload the victim after the
-      // FI elimination's emitted code is in place.
+    const bool NeedSeparateByteWork = IsStore && !OpKilled;
+    const unsigned NumScratchesNeeded = 1 + (NeedSeparateByteWork ? 1 : 0);
+
+    auto pickNonFree = [&](Register Skip) -> Register {
       for (Register R : Candidates) {
-        if (R != OpReg) {
-          VictimReg = R;
-          break;
-        }
+        if (R == OpReg || R == Skip)
+          continue;
+        if (!LivePhys.available(MF.getRegInfo(), R))
+          return R;
       }
-      assert(VictimReg.isValid() &&
-             "MtG: not even a victim register available for emergency spill");
-      emitEmergencySave(MBB, II, *TII, VictimReg);
-      TmpReg = VictimReg;
+      return Register();
+    };
+
+    Register TmpReg, ByteWorkReg, Victim, Victim2;
+    if (Free.size() >= NumScratchesNeeded) {
+      TmpReg = Free[0];
+      if (NeedSeparateByteWork)
+        ByteWorkReg = Free[1];
+    } else if (Free.size() + 1 >= NumScratchesNeeded) {
+      // Need to evict exactly one register. Prefer to keep TmpReg from Free
+      // (it's used first and longest), and evict for ByteWorkReg.
+      if (NumScratchesNeeded == 1) {
+        Victim = pickNonFree(/*Skip=*/Register());
+        TmpReg = Victim;
+      } else {
+        TmpReg = Free[0];
+        Victim = pickNonFree(/*Skip=*/TmpReg);
+        ByteWorkReg = Victim;
+      }
+    } else if (NeedSeparateByteWork &&
+               Free.size() + 2 >= NumScratchesNeeded) {
+      // Both need eviction — slot 0 for TmpReg, slot 1 for ByteWorkReg.
+      Victim = pickNonFree(/*Skip=*/Register());
+      Victim2 = pickNonFree(/*Skip=*/Victim);
+      TmpReg = Victim;
+      ByteWorkReg = Victim2;
+    } else {
+      report_fatal_error("MtG: byte-wise FI macro cannot satisfy its scratch "
+                         "register needs");
     }
 
+    if (OpKilled)
+      ByteWorkReg = OpReg; // safe: OpReg's value dies after this MI
+
+    assert(TmpReg.isValid());
+    assert(TmpReg != OpReg);
+    assert(!IsStore || ByteWorkReg.isValid());
+    assert(!IsStore || ByteWorkReg != TmpReg);
+
+    // Emergency saves (in order so the corresponding reloads can pop in
+    // reverse, even though both slots are independent).
+    if (Victim.isValid())
+      emitEmergencySave(MBB, II, *TII, Victim, /*Slot=*/0);
+    if (Victim2.isValid())
+      emitEmergencySave(MBB, II, *TII, Victim2, /*Slot=*/1);
+
+    // === Address: TmpReg = FP + totalOffset (mod 2^32) ===
     if (TmpReg != getFrameRegister(MF))
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), TmpReg)
                          .addUse(getFrameRegister(MF)));
-    MBB.insert(
-        II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
-
+    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
+                       .addImm(totalOffset));
     {
       auto AddMI = BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), TmpReg)
                        .addReg(TmpReg)
@@ -323,30 +364,64 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MBB.insert(II, AddMI);
     }
 
-    // Mark TmpReg as killed: the emergency path reloads the victim
-    // afterwards (so whatever's in TmpReg gets overwritten), and the
-    // non-emergency path picked a scratch whose value was dead by design.
-    // Without this kill flag, STOREBYTEWISE_MACRO's own expansion may
-    // trigger a NESTED emergency save to the same slot (slot 0), clobbering
-    // the outer save and leaving the victim reloaded with stale data.
-    if (MI.getOpcode() == MtG::STOREBYTEWISE_FI_MACRO) {
-      bool ValKilled = MI.getOperand(0).isKill();
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STOREBYTEWISE_MACRO))
-                         .addReg(OpReg, getKillRegState(ValKilled))
-                         .addReg(TmpReg, RegState::Kill));
+    // === Byte-wise body ===
+    if (IsStore) {
+      // Mirror of STOREBYTEWISE_MACRO's expansion (MtGInstrInfo.cpp), but
+      // emitted directly here so we never leave a dangling
+      // STOREBYTEWISE_MACRO whose own scratch logic would re-run LivePhys
+      // and possibly re-use slot 0.
+      if (ByteWorkReg != OpReg)
+        MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), ByteWorkReg)
+                           .addUse(OpReg));
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
+                         .addImm(256));
+      for (int i = 0; i < 4; ++i) {
+        MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::DIVIDE), ByteWorkReg)
+                           .addUse(ByteWorkReg));
+        MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::STORE))
+                           .addUse(ByteWorkReg)
+                           .addUse(TmpReg));
+        if (i < 3) {
+          MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), ByteWorkReg)
+                             .addUse(MtG::R6));
+          MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD1), TmpReg)
+                             .addUse(TmpReg));
+        }
+      }
     } else {
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOADBYTEWISE_MACRO), OpReg)
-                         .addReg(TmpReg, RegState::Kill));
+      // Mirror of LOADBYTEWISE_MACRO: high byte first, accumulate via *256.
+      // OpReg serves as both ValReg and accumulator; no separate ByteWorkReg
+      // needed (R6 is the per-iteration byte temp).
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ZERO), OpReg));
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(3));
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD), TmpReg)
+                         .addUse(TmpReg)
+                         .addUse(MtG::R0));
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
+                         .addImm(256));
+      for (int i = 0; i < 4; ++i) {
+        MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOAD), MtG::R6)
+                           .addUse(TmpReg));
+        MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD), OpReg)
+                           .addUse(OpReg)
+                           .addUse(MtG::R6));
+        if (i < 3) {
+          MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MULT), OpReg)
+                             .addUse(OpReg)
+                             .addUse(MtG::R0));
+          MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::SUB1COND), TmpReg)
+                             .addUse(TmpReg));
+        }
+      }
     }
 
-    if (NeedEmergency) {
-      // Now reload the victim's value so subsequent code sees its
-      // original contents.
-      emitEmergencyReload(MBB, II, *TII, VictimReg);
-    }
+    // Reload in reverse order (slot 1 first, then slot 0).
+    if (Victim2.isValid())
+      emitEmergencyReload(MBB, II, *TII, Victim2, /*Slot=*/1);
+    if (Victim.isValid())
+      emitEmergencyReload(MBB, II, *TII, Victim, /*Slot=*/0);
 
     MI.eraseFromParent();
-
     return true;
   }
   assert(false && "Unknown FrameIndex elimination!");

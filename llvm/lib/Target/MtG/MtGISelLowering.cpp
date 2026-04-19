@@ -838,13 +838,16 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     Register SrcReg2 = MI.getOperand(2).getReg();
 
     // Bias both operands: B = (val + 0x80000000) mod 2^32.
-    // We ADD 0x80000000 then SubCond with 2^32 to wrap. But MOVEIMM_MACRO
-    // clobbers R0, so we build both constants sequentially: first bias,
-    // apply to both operands, then build wrap and apply to both.
+    // We ADD 0x80000000 then SubCond with 2^32 to wrap. Bias (0x80000000)
+    // fits in a 32-bit spill slot and is safe to hold in a vreg that may
+    // be CSE'd / spilled. Wrap (2^32) does NOT fit in a 32-bit spill slot:
+    // STOREBYTEWISE truncates to 4 bytes, so a spilled Wrap reloads as 0
+    // and SUBCOND becomes a silent no-op. To keep Wrap off the spill path
+    // we materialize it straight into R0 (reserved; never allocated and
+    // never spilled) via NUMBUILD_MACRO and use R0 as rY in SUBCOND.
     Register Bias = MRI.createVirtualRegister(&MtG::GRRegClass);
     Register S1 = MRI.createVirtualRegister(&MtG::GRRegClass);
     Register S2 = MRI.createVirtualRegister(&MtG::GRRegClass);
-    Register Wrap = MRI.createVirtualRegister(&MtG::GRRegClass);
     Register B1 = MRI.createVirtualRegister(&MtG::GRRegClass);
     Register B2 = MRI.createVirtualRegister(&MtG::GRRegClass);
     BuildMI(*MBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), Bias)
@@ -853,12 +856,13 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
         .addUse(SrcReg1).addUse(Bias);
     BuildMI(*MBB, MI, DL, TII.get(MtG::ADD), S2)
         .addUse(SrcReg2).addUse(Bias);
-    BuildMI(*MBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), Wrap)
+    // R0 = 2^32 via NUMBUILD_MACRO (never spilled — R0 is reserved).
+    BuildMI(*MBB, MI, DL, TII.get(MtG::NUMBUILD_MACRO))
         .addImm((int64_t)(1ULL << 32));
     BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), B1)
-        .addUse(S1).addUse(Wrap);
+        .addUse(S1).addUse(MtG::R0);
     BuildMI(*MBB, MI, DL, TII.get(MtG::SUBCOND), B2)
-        .addUse(S2).addUse(Wrap);
+        .addUse(S2).addUse(MtG::R0);
 
     if (Op == MtG::LT_MACRO) {
       BuildMI(*MBB, MI, DL, TII.get(MtG::FLESS))
@@ -1027,12 +1031,20 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
           .addUse(SMVal);
     }
 
-    // For SHL: prepare wrapping mask (2^32) via MOVEIMM_MACRO.
-    Register WrapMask;
+    // For SHL: we previously materialized a 2^32 wrap mask and did
+    // `ResultNew = SubCond(Doubled, WrapMask)`. But 2^32 does not fit in
+    // a 32-bit spill slot (STOREBYTEWISE truncates to 4 bytes), so if RA
+    // ever spills WrapMask across a BB it reloads as 0 and the SubCond
+    // becomes a silent no-op. We can't keep WrapMask in R0 either because
+    // BRCOND_PSEUDO at the loop tail clobbers R0 every iteration.
+    // Instead we use a 2^31 threshold (spill-safe) and the identity
+    //   (val + val) mod 2^32  ==  2 * (val - 2^31 if bit31 else val)
+    // i.e. peel bit 31 off before doubling. See SHL_VAR case below.
+    Register HalfMask;
     if (Op == MtG::SHL_VAR_MACRO) {
-      WrapMask = MRI.createVirtualRegister(&MtG::GRRegClass);
-      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), WrapMask)
-          .addImm((int64_t)(1ULL << 32));
+      HalfMask = MRI.createVirtualRegister(&MtG::GRRegClass);
+      BuildMI(*EntryMBB, MI, DL, TII.get(MtG::MOVEIMM_MACRO), HalfMask)
+          .addImm((int64_t)0x80000000LL);
     }
 
     BuildMI(*EntryMBB, MI, DL, TII.get(MtG::FISZERO)).addUse(CounterInit);
@@ -1063,14 +1075,20 @@ MtGTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
         .addMBB(LoopMBB);
 
     if (Op == MtG::SHL_VAR_MACRO) {
-      // result = (result + result) then wrap with SubCond to keep < 2^32.
-      Register Doubled = MRI.createVirtualRegister(&MtG::GRRegClass);
-      BuildMI(LoopMBB, DL, TII.get(MtG::ADD), Doubled)
+      // result = (val + val) mod 2^32 without ever forming 2^32 in a vreg.
+      // Peel bit 31 off first: Peeled = val - (bit31 ? 2^31 : 0). Since
+      // SubCond(val, 2^31) subtracts 2^31 exactly when val >= 2^31, this
+      // gives Peeled ∈ [0, 2^31-1]. Then 2 * Peeled ∈ [0, 2^32-2] and
+      // equals (val + val) mod 2^32:
+      //   * bit31 == 0:  2*Peeled = 2*val            (no wrap needed)
+      //   * bit31 == 1:  2*Peeled = 2*(val - 2^31)   = 2*val mod 2^32
+      Register Peeled = MRI.createVirtualRegister(&MtG::GRRegClass);
+      BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), Peeled)
           .addUse(ResultPhi)
-          .addUse(ResultPhi);
-      BuildMI(LoopMBB, DL, TII.get(MtG::SUBCOND), ResultNew)
-          .addUse(Doubled)
-          .addUse(WrapMask);
+          .addUse(HalfMask);
+      BuildMI(LoopMBB, DL, TII.get(MtG::ADD), ResultNew)
+          .addUse(Peeled)
+          .addUse(Peeled);
     } else if (Op == MtG::SHR_VAR_MACRO) {
       BuildMI(LoopMBB, DL, TII.get(MtG::HALVE), ResultNew)
           .addUse(ResultPhi);

@@ -199,15 +199,12 @@ def MOVEREG_MACRO : Pseudo<(outs GR:$dst), (ins GR:$src1),
 // MachineCSE::isProfitableToCSE). MtG only has 8 allocatable GPRs and
 // every spill goes through the bytewise FI-macro chain (~30 instructions
 // + dynamic scratches), so re-emitting MOVEIMM at each use is genuinely
-// cheaper than the spill/reload it would otherwise force. Without this
-// flag, MachineCSE consolidates duplicate constants into long-lived vregs
-// that overflow the register file — the resulting RA spills exposed a
-// latent FI-elimination corner case where Phase-1's TmpReg and Phase-2's
-// ByteWorkReg interact with the single emergency-spill slot, silently
-// clobbering the SW handler's rdid so HandleControlStore is never reached.
-// NOTE: this flag mitigates the trigger (heavy CSE-induced pressure) but
-// does NOT fix the underlying FI-macro design. See Epic 1c handoff memo
-// for the proper fix options.
+// cheaper than the spill/reload it would otherwise force — an honest
+// cost-model input rather than a workaround. (The separate correctness
+// hazard where a > 32-bit constant such as 2^32 was being held in a
+// spillable vreg is fixed at its source: LT/GT/LE/GE_MACRO now keeps
+// 2^32 in R0 and SHL_VAR_MACRO avoids 2^32 entirely by peeling bit 31
+// before doubling — see MtGISelLowering.cpp.)
 let Defs = [R0] in {
 let isAsCheapAsAMove = 1 in
 def MOVEIMM_MACRO : Pseudo<(outs GR:$dst), (ins mtgimm:$imm),

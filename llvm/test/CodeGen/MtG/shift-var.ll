@@ -2,13 +2,14 @@
 
 ; Variable (register) shift operations.
 
-; shl %a, %b  →  loop: double %a, %b times; wrap with SubCond.
+; shl %a, %b  →  loop: peel bit31 via SubCond(a, 2^31), then double.
+; Avoiding a 2^32 vreg wrap mask keeps the constant spill-safe.
 define i32 @shl_var(i32 %a, i32 %b) nounwind {
 ; CHECK-LABEL: shl_var:
 ; CHECK: FIsZero
 ; CHECK: SetF
-; CHECK: Add
 ; CHECK: SubCond
+; CHECK: Add
 ; CHECK: Sub1Cond
 ; CHECK: Return
   %r = shl i32 %a, %b

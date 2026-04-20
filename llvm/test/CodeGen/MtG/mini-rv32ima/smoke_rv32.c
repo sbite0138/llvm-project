@@ -175,7 +175,7 @@ static uint32_t mulhu32(uint32_t a, uint32_t b) {
 #define MINIRV32_OTHERCSR_READ(...) ;
 #define MINIRV32_POSTEXEC(...) ;
 
-#include "mini-rv32ima.h"
+#include "/mnt/work/mini-rv32ima/mini-rv32ima/mini-rv32ima.h"
 
 /* Flat binary of tiny.c (14 words = 56 bytes), loaded at RAM offset 0
    which maps to 0x80000000 in guest address space. */

@@ -91,15 +91,6 @@ public:
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
                              unsigned AS, Instruction *CtxI) const override;
 
-  // MtG storage is one byte per simulator cell; an i32 lives across 4 cells
-  // and is reassembled by LOADBYTEWISE_MACRO. The plain LOAD instruction
-  // reads ONE cell, so the (zextloadi8/i16 -> LOAD) patterns only match
-  // genuine single-cell sub-word values. Generic DAGCombine load narrowing
-  // breaks that contract by feeding mid-int byte offsets through the same
-  // patterns — see the cpp comment for the two failure modes. We disable
-  // narrowing unconditionally.
-  bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
-                             std::optional<unsigned> ByteOffset) const override;
   /// LowerOperation - Provide custom lowering hooks for some operations.
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 

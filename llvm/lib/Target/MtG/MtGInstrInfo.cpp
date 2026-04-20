@@ -684,6 +684,286 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
           const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII, Victim);
     MI.eraseFromParent();
     return true;
+  } else if (MI.getOpcode() == MtG::LOADBYTEWISE16_MACRO) {
+    // 2-cell variant of LOADBYTEWISE_MACRO. Reads 2 consecutive cells
+    // (low byte at addr, high byte at addr+1) and assembles a 16-bit
+    // value. Same scratch / live-reg / emergency-slot dance as the 4-cell
+    // version since it shares the structure.
+    auto ValReg = MI.getOperand(0).getReg();
+    auto AddrReg = MI.getOperand(1).getReg();
+
+    const auto &MBB_ = *MI.getParent();
+    LivePhysRegs LivePhys(*MBB_.getParent()->getSubtarget().getRegisterInfo());
+    LivePhys.addLiveOuts(MBB_);
+    for (auto It = MBB_.rbegin(); It != MBB_.rend(); ++It) {
+      if (&*It == &MI)
+        break;
+      LivePhys.stepBackward(*It);
+    }
+    const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
+
+    const auto Candidates = {
+        MtG::R1,  MtG::R3,  MtG::R4,  MtG::R5, MtG::R7,
+        MtG::R8,  MtG::R9,  MtG::R10, MtG::R11,
+    };
+    Register IterAddrReg, Victim;
+    for (Register R : Candidates) {
+      if (R == ValReg || R == AddrReg)
+        continue;
+      if (LivePhys.available(MRI_, R)) {
+        IterAddrReg = R;
+        break;
+      }
+    }
+    if (!IterAddrReg.isValid()) {
+      for (Register R : Candidates) {
+        if (R == ValReg || R == AddrReg)
+          continue;
+        IterAddrReg = R;
+        Victim = R;
+        break;
+      }
+    }
+    if (!IterAddrReg.isValid())
+      report_fatal_error("MtG: LOADBYTEWISE16_MACRO cannot find any scratch "
+                         "distinct from $val and $addr");
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
+                                         MI.getIterator(), TII, Victim);
+
+    std::vector<MachineInstr *> NumBuildMIs;
+
+    BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
+    NumBuildMIs.push_back(
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1));
+    // IterAddrReg now points at the high byte (addr + 1).
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), IterAddrReg)
+        .addUse(IterAddrReg)
+        .addUse(MtG::R0);
+    NumBuildMIs.push_back(
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(256));
+
+    for (int i = 0; i < 2; ++i) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R6)
+          .addUse(IterAddrReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+          .addUse(ValReg)
+          .addUse(MtG::R6);
+      if (i < 1) {
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+            .addUse(ValReg)
+            .addUse(MtG::R0);
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), IterAddrReg)
+            .addUse(IterAddrReg);
+      }
+    }
+
+    for (auto *NumBuildMI : NumBuildMIs)
+      expandPostRAPseudo(*NumBuildMI);
+
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII, Victim);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::STOREBYTEWISE16_MACRO) {
+    // 2-cell variant of STOREBYTEWISE_MACRO. Splits a 16-bit value into
+    // two adjacent cells (low byte at addr, high byte at addr+1).
+    // Uses the same kill-tracking + emergency-slot scratch logic as the
+    // 4-cell version, just with the loop count set to 2.
+    auto ValReg = MI.getOperand(0).getReg();
+    auto AddrReg = MI.getOperand(1).getReg();
+    assert(ValReg != AddrReg &&
+           "STOREBYTEWISE16 expects distinct val and addr");
+    const bool ValKilled = MI.getOperand(0).isKill();
+    const bool AddrKilled = MI.getOperand(1).isKill();
+
+    const auto &MBB_ = *MI.getParent();
+    LivePhysRegs LivePhys(*MBB_.getParent()->getSubtarget().getRegisterInfo());
+    LivePhys.addLiveOuts(MBB_);
+    for (auto It = MBB_.rbegin(); It != MBB_.rend(); ++It) {
+      if (&*It == &MI)
+        break;
+      LivePhys.stepBackward(*It);
+    }
+    const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
+
+    SmallVector<Register, 4> Free, Candidates;
+    for (Register R : {MtG::R1, MtG::R3, MtG::R4, MtG::R5, MtG::R7, MtG::R8,
+                       MtG::R9, MtG::R10, MtG::R11}) {
+      if (R == ValReg || R == AddrReg)
+        continue;
+      Candidates.push_back(R);
+      if (LivePhys.available(MRI_, R))
+        Free.push_back(R);
+    }
+
+    unsigned NumScratchesNeeded =
+        (ValKilled ? 0u : 1u) + (AddrKilled ? 0u : 1u);
+    Register IterAddrReg, ByteWorkReg, Victim;
+
+    auto pickOne = [&](unsigned Idx) -> Register {
+      if (Idx < Free.size())
+        return Free[Idx];
+      for (Register R : Candidates)
+        if (!LivePhys.available(MRI_, R))
+          return R;
+      return Register();
+    };
+
+    Register Victim2;
+    if (Free.size() >= NumScratchesNeeded) {
+      unsigned Next = 0;
+      if (!AddrKilled) IterAddrReg = pickOne(Next++);
+      if (!ValKilled)  ByteWorkReg = pickOne(Next++);
+    } else if (Free.size() + 1 >= NumScratchesNeeded &&
+               Candidates.size() >= NumScratchesNeeded) {
+      unsigned Next = 0;
+      if (!AddrKilled) IterAddrReg = pickOne(Next++);
+      if (!ValKilled)  ByteWorkReg = pickOne(Next++);
+      if (IterAddrReg.isValid() && !LivePhys.available(MRI_, IterAddrReg))
+        Victim = IterAddrReg;
+      else if (ByteWorkReg.isValid() && !LivePhys.available(MRI_, ByteWorkReg))
+        Victim = ByteWorkReg;
+      assert(Victim.isValid() && !LivePhys.available(MRI_, Victim));
+    } else if (Candidates.size() >= NumScratchesNeeded) {
+      unsigned Next = 0;
+      if (!AddrKilled) {
+        IterAddrReg = Candidates[Next++];
+        if (!LivePhys.available(MRI_, IterAddrReg))
+          Victim = IterAddrReg;
+      }
+      if (!ValKilled) {
+        ByteWorkReg = Candidates[Next++];
+        if (!LivePhys.available(MRI_, ByteWorkReg)) {
+          if (Victim.isValid())
+            Victim2 = ByteWorkReg;
+          else
+            Victim = ByteWorkReg;
+        }
+      }
+    } else {
+      report_fatal_error("MtG: STOREBYTEWISE16_MACRO cannot satisfy its "
+                         "scratch-register needs; not enough candidate "
+                         "registers available");
+    }
+    if (ValKilled)  ByteWorkReg = ValReg;
+    if (AddrKilled) IterAddrReg = AddrReg;
+
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
+                                         MI.getIterator(), TII, Victim, 0);
+    if (Victim2.isValid())
+      MtGRegisterInfo::emitEmergencySave(const_cast<MachineBasicBlock &>(MBB_),
+                                         MI.getIterator(), TII, Victim2, 1);
+
+    if (!AddrKilled)
+      BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
+    if (!ValKilled)
+      BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, ValReg);
+
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(256);
+    for (int i = 0; i < 2; ++i) {
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), ByteWorkReg)
+          .addUse(ByteWorkReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+          .addUse(ByteWorkReg)
+          .addUse(IterAddrReg);
+      if (i < 1) {
+        BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, MtG::R6);
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD1), IterAddrReg)
+            .addUse(IterAddrReg);
+      }
+    }
+
+    expandPostRAPseudo(*NumBuildMI);
+    if (Victim2.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII,
+          Victim2, 1);
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII,
+          Victim, 0);
+    MI.eraseFromParent();
+    return true;
+  } else if (MI.getOpcode() == MtG::STORE_BYTE_MACRO) {
+    // 1-cell store of the low byte of $val into the cell at $addr.
+    // STORE writes the source register verbatim, so we mask with
+    // (DIVIDE val by 256) first — the remainder lives in val, the
+    // quotient goes to R6 (discarded). If $val isn't killed we copy it
+    // into a scratch first so we don't perturb a value the caller still
+    // needs; if all candidates are live we evict one through the
+    // emergency slot, just like STOREBYTEWISE does.
+    auto ValReg = MI.getOperand(0).getReg();
+    auto AddrReg = MI.getOperand(1).getReg();
+    const bool ValKilled = MI.getOperand(0).isKill();
+
+    const auto &MBB_ = *MI.getParent();
+    LivePhysRegs LivePhys(*MBB_.getParent()->getSubtarget().getRegisterInfo());
+    LivePhys.addLiveOuts(MBB_);
+    for (auto It = MBB_.rbegin(); It != MBB_.rend(); ++It) {
+      if (&*It == &MI)
+        break;
+      LivePhys.stepBackward(*It);
+    }
+    const MachineRegisterInfo &MRI_ = MBB_.getParent()->getRegInfo();
+
+    Register ByteWorkReg = ValKilled ? ValReg : Register();
+    Register Victim;
+    if (!ValKilled) {
+      const auto Candidates = {
+          MtG::R1,  MtG::R3,  MtG::R4,  MtG::R5, MtG::R7,
+          MtG::R8,  MtG::R9,  MtG::R10, MtG::R11,
+      };
+      for (Register R : Candidates) {
+        if (R == ValReg || R == AddrReg)
+          continue;
+        if (LivePhys.available(MRI_, R)) {
+          ByteWorkReg = R;
+          break;
+        }
+      }
+      if (!ByteWorkReg.isValid()) {
+        for (Register R : Candidates) {
+          if (R == ValReg || R == AddrReg)
+            continue;
+          ByteWorkReg = R;
+          Victim = R;
+          break;
+        }
+      }
+      if (!ByteWorkReg.isValid())
+        report_fatal_error("MtG: STORE_BYTE_MACRO cannot find any scratch "
+                           "distinct from $val and $addr");
+      if (Victim.isValid())
+        MtGRegisterInfo::emitEmergencySave(
+            const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII,
+            Victim, 0);
+      BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, ByteWorkReg, ValReg);
+    }
+
+    auto NumBuildMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(256);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::DIVIDE), ByteWorkReg)
+        .addUse(ByteWorkReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::STORE))
+        .addUse(ByteWorkReg)
+        .addUse(AddrReg);
+
+    expandPostRAPseudo(*NumBuildMI);
+    if (Victim.isValid())
+      MtGRegisterInfo::emitEmergencyReload(
+          const_cast<MachineBasicBlock &>(MBB_), MI.getIterator(), TII,
+          Victim, 0);
+    MI.eraseFromParent();
+    return true;
   } else if (MI.getOpcode() == MtG::REM_MACRO) {
     auto DstReg = MI.getOperand(0).getReg();
     auto SrcReg = MI.getOperand(2).getReg();

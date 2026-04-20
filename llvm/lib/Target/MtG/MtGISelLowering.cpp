@@ -1243,28 +1243,3 @@ bool MtGTargetLowering::isLegalAddressingMode(const DataLayout &DL,
   return true;
 }
 
-bool MtGTargetLowering::shouldReduceLoadWidth(
-    SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
-    std::optional<unsigned> ByteOffset) const {
-  // MtG storage is "one byte per simulator cell": an i32 lives across 4
-  // adjacent cells and is reassembled by LOADBYTEWISE_MACRO (cf.
-  // MtGInstrInfo.cpp). The plain LOAD instruction reads ONE cell, so the
-  // sub-word patterns (zextloadi8/i16 -> LOAD) only do the right thing
-  // when the entire value is stored in a single cell — i.e. for ABI-level
-  // char / short fields where the producer wrote a single sub-word value.
-  //
-  // Generic DAGCombine load narrowing breaks both invariants:
-  //   * Non-zero ByteOffset (e.g. (srl (load i32 X), 16) -> (load i16 X+2))
-  //     wants the high half of a multi-cell i32; LOAD X+2 returns just one
-  //     byte (cell X+2), losing the byte at X+3.
-  //   * Zero ByteOffset (e.g. (and (load i32 X), 0xFFFF) -> (load i16 X))
-  //     wants the low half of a multi-cell i32; LOAD X returns just the
-  //     low byte (cell X), losing the byte at X+1.
-  // Both fire on common code paths at -O0 (alloca/store/load shapes
-  // survive ISel) and produce silent miscompiles. Refuse all narrowing.
-  (void)Load;
-  (void)ExtTy;
-  (void)NewVT;
-  (void)ByteOffset;
-  return false;
-}

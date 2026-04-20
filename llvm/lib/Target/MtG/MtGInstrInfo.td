@@ -184,6 +184,24 @@ let hasSideEffects = 0, mayStore = 1, mayLoad = 0, isPseudo = 1 in
 def STOREBYTEWISE_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
                     "STOREBYTEWISE_MACRO\t $val, $addr",[(store GR:$val, GR:$addr)]>;
 
+// 2-cell sub-word memory traffic for i16 (one byte per cell, low byte
+// first). Lets `unsigned short` round-trip with `unsigned int` and lets
+// the byte-addressable LLVM memory model match MtG's actual layout.
+let hasSideEffects = 0, mayStore = 0, mayLoad = 1, isPseudo = 1 in
+def LOADBYTEWISE16_MACRO : Pseudo<(outs GR:$val), (ins GR:$addr),
+                    "LOADBYTEWISE16_MACRO\t $val, $addr",[]>;
+
+let hasSideEffects = 0, mayStore = 1, mayLoad = 0, isPseudo = 1 in
+def STOREBYTEWISE16_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
+                    "STOREBYTEWISE16_MACRO\t $val, $addr",[]>;
+
+// 1-cell store with implicit truncation to a single byte: STORE writes
+// the source register verbatim, so we mask to 0xFF first to keep cells
+// in [0, 255]. This is the truncstorei8 lowering.
+let hasSideEffects = 0, mayStore = 1, mayLoad = 0, isPseudo = 1 in
+def STORE_BYTE_MACRO : Pseudo<(outs), (ins GR:$val, GR:$addr),
+                    "STORE_BYTE_MACRO\t $val, $addr",[]>;
+
 def LOADBYTEWISE_IMM_MACRO : Pseudo<(outs GR:$val), (ins mtgimm:$imm),
                     "LOADBYTEWISE_IMM_MACRO\t $val, $imm",[]>;
 def STOREBYTEWISE_IMM_MACRO : Pseudo<(outs), (ins GR:$val, mtgimm:$imm),
@@ -444,18 +462,18 @@ def LOAD : MtGFormCRR<9,
                       (outs GR:$rY), (ins GR:$rZ),
                       "Load\t $rY, $rZ", []>;
 
-// Sub-word memory traffic. MtG's Load / Store move a whole simulator
-// memory cell (any integer); we use them for i8 / i16 access so that
-// `char` / `short` fields cost one cell instead of four. The callers
-// are responsible for keeping the stored value in range — clang emits
-// the masking implicitly for the cases we care about (e.g. assigning
-// a constant char field, reading an unsigned char into an int).
-def : Pat<(truncstorei8  GR:$val, GR:$addr), (STORE GR:$val, GR:$addr)>;
-def : Pat<(truncstorei16 GR:$val, GR:$addr), (STORE GR:$val, GR:$addr)>;
+// Sub-word memory traffic. MtG storage is uniformly one byte per cell:
+// an i8 fits in a single cell; an i16 spans two adjacent cells (low
+// byte, then high byte) reassembled by LOADBYTEWISE16_MACRO. The plain
+// LOAD/STORE pair is single-cell and only correct when the cell already
+// holds a byte-sized value, so STORE_BYTE_MACRO masks to 0xFF before
+// storing for truncstorei8.
+def : Pat<(truncstorei8  GR:$val, GR:$addr), (STORE_BYTE_MACRO GR:$val, GR:$addr)>;
+def : Pat<(truncstorei16 GR:$val, GR:$addr), (STOREBYTEWISE16_MACRO GR:$val, GR:$addr)>;
 def : Pat<(i32 (zextloadi8  GR:$addr)), (LOAD GR:$addr)>;
-def : Pat<(i32 (zextloadi16 GR:$addr)), (LOAD GR:$addr)>;
+def : Pat<(i32 (zextloadi16 GR:$addr)), (LOADBYTEWISE16_MACRO GR:$addr)>;
 def : Pat<(i32 (extloadi8   GR:$addr)), (LOAD GR:$addr)>;
-def : Pat<(i32 (extloadi16  GR:$addr)), (LOAD GR:$addr)>;
+def : Pat<(i32 (extloadi16  GR:$addr)), (LOADBYTEWISE16_MACRO GR:$addr)>;
 
 // --- X=10 : NumBuild ----------------------------------------------------
 let Defs = [R0] in

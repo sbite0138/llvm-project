@@ -19,17 +19,13 @@
  * WFI on a subsequent step. No MtG ISA changes; this is host-side
  * MMIO emulation only.
  *
- * STATUS:
- *   -O0 PASS  (full "ABCDEFGHIJKL" — all 12 RV32A/Zicsr/priv tests)
- *   -O1 FAIL  (Jump out of bounds in MtG-compiled mini-rv32ima.h CSR
- *              switch; minimum repro is the very first `csrw mtvec`
- *              after main_test starts. mtg_rv32.c / rv32m_rv32.c don't
- *              hit the CSR path so they pass at -O1; this harness is
- *              the first guest that does. Tracked as a follow-up Epic
- *              for the MtG -O1 codegen.)
+ * STATUS: -O0 / -O1 both PASS (all 12 RV32A/Zicsr/priv tests).
+ *   -O1 used to wild-jump in the MtG-compiled mini-rv32ima.h CSR switch;
+ *   that was a tail-merge interaction with R0-as-branch-target and is
+ *   fixed in MtGTargetMachine.cpp (setEnableTailMerge(false)).
  *
- * Manual invocation (use -O0 until the -O1 codegen issue is resolved):
- *   build/bin/clang --target=mtg -O0 -nostdlib -ffreestanding -S \
+ * Manual invocation:
+ *   build/bin/clang --target=mtg -O1 -nostdlib -ffreestanding -S \
  *       llvm/test/CodeGen/MtG/mini-rv32ima/rv32priv_rv32.c -o /tmp/t.s \
  *       -I build/lib/clang/23/include
  *   python3 ursa/tools/mtg-link.py /tmp/t.s -o /tmp/linked.s

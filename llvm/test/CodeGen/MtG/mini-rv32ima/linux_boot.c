@@ -147,11 +147,9 @@ static uint32_t mulhu32(uint32_t a, uint32_t b) {
     if (HandleControlStore(addy, val)) return val;
 #define MINIRV32_HANDLE_MEM_LOAD_CONTROL(addy, rval) \
     rval = HandleControlLoad(addy);
-/* Default UART/SYSCON range plus the CLINT region so timer accesses
-   route through our shim (Epic 3-3 pattern). */
-#define MINIRV32_MMIO_RANGE(n) \
-    ((((n) >= 0x10000000) && ((n) < 0x12000000)) || \
-     (((n) >= 0x02000000) && ((n) < 0x02100000)))
+/* Default UART/SYSCON range; mini-rv32ima's default DTB places CLINT
+   at 0x11000000 which is already inside the default 0x10000000..
+   0x12000000 range, so we don't need to widen it. */
 #define MINIRV32_OTHERCSR_WRITE(...) ;
 #define MINIRV32_OTHERCSR_READ(...) ;
 #define MINIRV32_POSTEXEC(...) ;
@@ -167,14 +165,21 @@ static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
         done_flag = 1;
         return val;
     }
-    if (addy == 0x02004000) { g_core->timermatchl = val; return 0; }
-    if (addy == 0x02004004) { g_core->timermatchh = val; return 0; }
+    /* CLINT at 0x11000000 per mini-rv32ima's default DTB. Standard
+       layout: msip@+0, mtimecmp@+0x4000, mtime@+0xBFF8 (read-only). */
+    if (addy == 0x11004000) { g_core->timermatchl = val; return 0; }
+    if (addy == 0x11004004) { g_core->timermatchh = val; return 0; }
     return 0;
 }
 
 static uint32_t HandleControlLoad(uint32_t addy) {
-    if (addy == 0x0200BFF8) return g_core ? g_core->timerl : 0;
-    if (addy == 0x0200BFFC) return g_core ? g_core->timerh : 0;
+    /* 8250 UART line-status register: always report "transmit holding
+       empty" (bit 5) and "transmit shift empty" (bit 6) so Linux's
+       early console polling doesn't spin forever. We never emulate
+       input, so bit 0 (data ready) stays 0. */
+    if (addy == 0x10000005) return 0x60;
+    if (addy == 0x1100BFF8) return g_core ? g_core->timerl : 0;
+    if (addy == 0x1100BFFC) return g_core ? g_core->timerh : 0;
     return 0;
 }
 
@@ -214,7 +219,7 @@ void _start(void) {
        (e.g. BSS zero-init of ~150 KB dominates for the first several
        minutes under the current Python simulator). */
     done_flag = 0;
-    for (i = 0; i < 500000000u && !done_flag; i++) {
+    for (i = 0; i < 4000000000u && !done_flag; i++) {
         int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, 1, 1);
         if (ret == 0x5555) {
             done_flag = 1;

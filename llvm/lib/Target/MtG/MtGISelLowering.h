@@ -90,6 +90,13 @@ public:
 
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
                              unsigned AS, Instruction *CtxI) const override;
+
+  // MtG memory is word-addressable: each LOAD returns one whole simulator
+  // cell regardless of the IR's nominal element size. Generic DAGCombine
+  // load narrowing is unsound for us — see the cpp comment for the two
+  // failure modes. We disable it unconditionally.
+  bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
+                             std::optional<unsigned> ByteOffset) const override;
   /// LowerOperation - Provide custom lowering hooks for some operations.
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 

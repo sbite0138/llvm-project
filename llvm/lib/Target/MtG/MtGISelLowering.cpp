@@ -1242,3 +1242,22 @@ bool MtGTargetLowering::isLegalAddressingMode(const DataLayout &DL,
     return false;
   return true;
 }
+
+bool MtGTargetLowering::shouldReduceLoadWidth(
+    SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
+    std::optional<unsigned> ByteOffset) const {
+  // MtG memory cells hold a whole 32-bit word and the LOAD instruction
+  // returns the entire cell — there is no native sub-word access. Generic
+  // DAGCombine load narrowing is therefore unsound for us in two ways:
+  //   * Non-zero ByteOffset: e.g. (srl (load i32 X), 16) -> (load i16 X+2).
+  //     X+2 is a byte offset that doesn't name a distinct cell.
+  //   * Zero ByteOffset: e.g. (and (load i32 X), 0xFFFF) -> (load i16 X).
+  //     Our zextloadi8/i16 patterns lower to plain LOAD, which returns the
+  //     full unmasked cell, so the implied truncation is silently dropped.
+  // Either way, refuse the narrowing and keep the original wide load.
+  (void)Load;
+  (void)ExtTy;
+  (void)NewVT;
+  (void)ByteOffset;
+  return false;
+}

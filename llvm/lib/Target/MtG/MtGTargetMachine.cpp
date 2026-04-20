@@ -62,7 +62,22 @@ namespace {
 class MtGPassConfig : public TargetPassConfig {
 public:
   MtGPassConfig(MtGTargetMachine &TM, PassManagerBase &PM)
-      : TargetPassConfig(TM, PM) {}
+      : TargetPassConfig(TM, PM) {
+    // Disable cross-block tail merging. MtG branches consume R0 (the
+    // NumBuild accumulator) as their displacement, so the placeholder
+    // NumBuilds emitted before each Jump unavoidably clobber R0. R0 is
+    // a reserved register, which means LLVM's liveness analysis treats
+    // it as "live everywhere" and ignores the implicit-def on BR_PSEUDO
+    // / Jump. BranchFolder (run by MachineBlockPlacement) then happily
+    // tail-merges code that reads R0 in the successor of a branch — but
+    // the actual R0 value at the successor is whatever the placeholder
+    // NumBuilds built (the jump distance), not the case-specific value
+    // the predecessor wanted to pass. Symptom: rv32priv_rv32.c -O1 hits
+    // a wild MtG jump because the per-CSR-case offset stored in R0 by
+    // the predecessor is concatenated with the branch-placeholder
+    // NumBuilds in ursa's NumBuild semantics, producing R0 ≈ 2^41.
+    setEnableTailMerge(false);
+  }
 
   MtGTargetMachine &getMtGTargetMachine() const {
     return getTM<MtGTargetMachine>();

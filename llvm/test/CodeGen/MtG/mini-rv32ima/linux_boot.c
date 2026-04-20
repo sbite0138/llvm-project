@@ -156,7 +156,18 @@ static uint32_t mulhu32(uint32_t a, uint32_t b) {
 
 #include "/mnt/work/mini-rv32ima/mini-rv32ima/mini-rv32ima.h"
 
+#ifdef LINUX_BOOT_MMIO_TRACE
+static uint32_t mmio_store_count;
+static uint32_t mmio_load_count;
+#endif
+
 static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
+#ifdef LINUX_BOOT_MMIO_TRACE
+    /* Emit one '>' per store to any MMIO address. Lets us see whether
+       the kernel reaches device code at all. */
+    mmio_store_count++;
+    if ((mmio_store_count & 0xFF) == 0) __mtg_output('>');
+#endif
     if (addy == 0x10000000) {
         __mtg_output(val);
         return 0;
@@ -165,18 +176,16 @@ static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
         done_flag = 1;
         return val;
     }
-    /* CLINT at 0x11000000 per mini-rv32ima's default DTB. Standard
-       layout: msip@+0, mtimecmp@+0x4000, mtime@+0xBFF8 (read-only). */
     if (addy == 0x11004000) { g_core->timermatchl = val; return 0; }
     if (addy == 0x11004004) { g_core->timermatchh = val; return 0; }
     return 0;
 }
 
 static uint32_t HandleControlLoad(uint32_t addy) {
-    /* 8250 UART line-status register: always report "transmit holding
-       empty" (bit 5) and "transmit shift empty" (bit 6) so Linux's
-       early console polling doesn't spin forever. We never emulate
-       input, so bit 0 (data ready) stays 0. */
+#ifdef LINUX_BOOT_MMIO_TRACE
+    mmio_load_count++;
+    if ((mmio_load_count & 0xFF) == 0) __mtg_output('<');
+#endif
     if (addy == 0x10000005) return 0x60;
     if (addy == 0x1100BFF8) return g_core ? g_core->timerl : 0;
     if (addy == 0x1100BFFC) return g_core ? g_core->timerh : 0;
@@ -225,7 +234,7 @@ void _start(void) {
             done_flag = 1;
         }
 #ifdef LINUX_BOOT_TRACE
-        if ((i & 0x1FFu) == 0u) {
+        if ((i & 0x7Fu) == 0u) {
             uint32_t pc = core->pc;
             unsigned k;
             __mtg_output('[');

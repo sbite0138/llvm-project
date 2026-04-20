@@ -334,12 +334,21 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   } else if (MI.getOpcode() == MtG::NEG_MACRO) {
     // "$dst = NEG_MACRO $dst"  (src1 is tied to dst by the .td Constraint)
     //   →  NUMBUILD_MACRO -1   ; R0 = 2^32 - 1 = -1 (mod 2^32)
-    //       MULT $dst, R0      ; $dst *= -1
+    //       MULT $dst, R0      ; $dst *= -1  (arbitrary precision — WIDE)
+    //       NUMBUILD_MACRO 2^32
+    //       REM $dst, R0       ; $dst %= 2^32  (back to 32-bit)
+    //
+    // The REM is essential because MULT is arbitrary precision in MtG:
+    // for any $src > 1, $src * (2^32 - 1) is > 2^32, and without the
+    // wrap the output vreg carries a value > 2^32 that a later spill
+    // would silently truncate. SUB_MACRO hides this because it REMs at
+    // the end, but standalone `-x` (e.g. `return -a;`) used to produce a
+    // wide value. Caught by wrap_mtg.c test G (uneg(INT_MIN) == INT_MIN).
     auto DstReg = MI.getOperand(0).getReg();
     std::set<Register> UseRegs = {MtG::R0};
     assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
 
-    auto NumBuildMI =
+    auto NumBuildNegMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(-1);
     auto MultMI =
@@ -349,8 +358,17 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // Prevent BranchFolder tail-merge from separating the MULT from the
     // NumBuilds that set R0; the MtG jump expansion later clobbers R0.
     MultMI->setFlag(MachineInstr::NoMerge);
+    auto NumBuildWrapMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
+            .addImm(1LL << 32);
+    auto RemMI =
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::REM_MACRO), DstReg)
+            .addUse(DstReg)
+            .addUse(MtG::R0);
     MI.eraseFromParent();
-    expandPostRAPseudo(*NumBuildMI);
+    expandPostRAPseudo(*NumBuildNegMI);
+    expandPostRAPseudo(*NumBuildWrapMI);
+    expandPostRAPseudo(*RemMI);
     return true;
   } else if (MI.getOpcode() == MtG::NOT_MACRO) {
     // NOT(x) = 0xFFFFFFFF - x. Defs=[R0,R6] so R6 is safe as scratch.

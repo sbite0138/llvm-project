@@ -21,13 +21,20 @@
  *       llvm/test/CodeGen/MtG/mini-rv32ima/linux_boot.c -o /tmp/t.s \
  *       -I build/lib/clang/23/include
  *   python3 ursa/tools/mtg-link.py /tmp/t.s -o /tmp/linked.s
- *   python3 ursa/src/main.py /tmp/linked.s --zero-mem \
- *       --rom /path/to/Image@<ram_words_addr> \
- *       --rom /path/to/dtb.bin@<ram_words_addr + DTB_OFFSET>
+ *   ursa/ursa-rs/target/release/ursa-rs /tmp/linked.s --zero-mem \
+ *       --rom /path/to/Image@1024 \
+ *       --rom /path/to/dtb.bin@8387904
  *
- *   (ram_words_addr is the MtG address of the ram_words[] array; look
- *   it up in the linked .s or print `prog.globals["ram_words"]` from
- *   ursa's assembler module.)
+ * Why 1024 and 8387904:
+ *   ram_words lives at MtG byte address 1024 (the start of globals;
+ *   confirm via `print(prog.globals["ram_words"])` in ursa's assembler
+ *   module, or by reading `.comm ram_words` layout in the linked .s).
+ *   The kernel image goes at ram_words byte 0, i.e. MtG address 1024.
+ *   The DTB goes at ram_words byte (RAM_SIZE - sizeof(state) - DTB_SIZE)
+ *   = 8388608 - 192 - 1536 = 8386880, i.e. MtG address 1024 + 8386880
+ *   = 8387904. Miscounting this by even a single cell lands the kernel
+ *   on "memory@8000..." strings inside the DTB body and makes
+ *   fdt_check_header fail silently — been there.
  */
 
 #include <mtg.h>
@@ -161,6 +168,61 @@ static uint32_t mmio_store_count;
 static uint32_t mmio_load_count;
 #endif
 
+#if defined(LINUX_BOOT_PC_HIST) || defined(LINUX_BOOT_TRAP_TRACE) || defined(LINUX_BOOT_STEP_TRACE)
+static void hex32(uint32_t v) {
+    unsigned k;
+    for (k = 0; k < 8; k++) {
+        unsigned nib = (v >> ((7 - k) * 4)) & 0xF;
+        __mtg_output(nib < 10 ? ('0' + nib) : ('A' + (nib - 10)));
+    }
+}
+#endif
+
+#ifdef LINUX_BOOT_PC_HIST
+/* Hash-based PC histogram: key=PC, cnt=hits. Linear-probe, drop on
+   overflow. 8192 slots covers ~1k distinct hot PCs comfortably. */
+#define PC_HIST_SIZE 8192u
+#define PC_HIST_MASK (PC_HIST_SIZE - 1u)
+static uint32_t pc_hist_key[PC_HIST_SIZE];
+static uint32_t pc_hist_cnt[PC_HIST_SIZE];
+static uint32_t pc_hist_dropped;
+
+static void pc_hist_add(uint32_t pc) {
+    uint32_t h = (pc * 2654435761u) & PC_HIST_MASK;
+    uint32_t probe;
+    for (probe = 0; probe < PC_HIST_SIZE; probe++) {
+        uint32_t slot = (h + probe) & PC_HIST_MASK;
+        uint32_t k = pc_hist_key[slot];
+        if (k == pc) { pc_hist_cnt[slot]++; return; }
+        if (k == 0 && pc_hist_cnt[slot] == 0) {
+            pc_hist_key[slot] = pc;
+            pc_hist_cnt[slot] = 1;
+            return;
+        }
+    }
+    pc_hist_dropped++;
+}
+
+static void pc_hist_dump(void) {
+    uint32_t i;
+    __mtg_output('\n');
+    __mtg_output('H'); __mtg_output('I'); __mtg_output('S'); __mtg_output('T');
+    __mtg_output(':'); __mtg_output('\n');
+    for (i = 0; i < PC_HIST_SIZE; i++) {
+        uint32_t c = pc_hist_cnt[i];
+        if (c == 0) continue;
+        hex32(pc_hist_key[i]);
+        __mtg_output('=');
+        hex32(c);
+        __mtg_output('\n');
+    }
+    __mtg_output('D'); __mtg_output('R'); __mtg_output('O'); __mtg_output('P');
+    __mtg_output('=');
+    hex32(pc_hist_dropped);
+    __mtg_output('\n');
+}
+#endif
+
 static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
 #ifdef LINUX_BOOT_MMIO_TRACE
     /* Emit one '>' per store to any MMIO address. Lets us see whether
@@ -217,6 +279,25 @@ void _start(void) {
     core->regs[11] = dtb_guest_addr;   /* a1 = DTB pointer */
     core->extraflags = 3;              /* M-mode */
 
+    /* Patch default64mbdtb's memory-size sentinel to match our actual
+       RAM (= dtb byte offset). Without this, the kernel trusts the
+       DTB's 64 MB claim and oops-es the first time memblock hands out
+       a page past our 8 MB. Matches what mini-rv32ima.c does natively.
+       The sentinel at DTB byte 0x13c is 0x03 0xFF 0xC0 0x00 (BE for
+       ~64 MB - 16 KB), appearing as the LE u32 0x00C0FF03. */
+    uint8_t *dtb_bytes =
+        (uint8_t *)ram_words + (dtb_guest_addr - MINIRV32_RAM_IMAGE_OFFSET);
+    uint32_t *dtb_sentinel = (uint32_t *)(dtb_bytes + 0x13c);
+    if (*dtb_sentinel == 0x00c0ff03u) {
+        uint32_t valid_ram =
+            dtb_guest_addr - MINIRV32_RAM_IMAGE_OFFSET; /* bytes of usable RAM */
+        *dtb_sentinel =
+            ((valid_ram >> 24) & 0xFFu) |
+            (((valid_ram >> 16) & 0xFFu) << 8) |
+            (((valid_ram >> 8) & 0xFFu) << 16) |
+            ((valid_ram & 0xFFu) << 24);
+    }
+
     g_core = core;
 
     /* Run until the kernel halts via SYSCON, or until a conservative
@@ -228,11 +309,55 @@ void _start(void) {
        (e.g. BSS zero-init of ~150 KB dominates for the first several
        minutes under the current Python simulator). */
     done_flag = 0;
-    for (i = 0; i < 4000000000u && !done_flag; i++) {
+#ifndef LINUX_BOOT_MAX_RV32_STEPS
+#define LINUX_BOOT_MAX_RV32_STEPS 4000000000u
+#endif
+#ifdef LINUX_BOOT_TRAP_TRACE
+    uint32_t prev_pc = 0xFFFFFFFFu;
+    uint32_t trap_log_count = 0;
+#endif
+    for (i = 0; i < LINUX_BOOT_MAX_RV32_STEPS && !done_flag; i++) {
         int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, 1, 1);
         if (ret == 0x5555) {
             done_flag = 1;
         }
+#ifdef LINUX_BOOT_STEP_TRACE
+        /* Emit `P <pc>` for every step up to LINUX_BOOT_STEP_TRACE (a
+           compile-time limit). Handy for diffing the guest PC stream
+           against a native mini-rv32ima run and finding the first
+           divergence — the technique that caught the 2026-04-21 DTB
+           off-by-256 bug. */
+        if (i < (uint32_t)LINUX_BOOT_STEP_TRACE) {
+            __mtg_output('P');
+            __mtg_output(' ');
+            hex32(core->pc);
+            __mtg_output('\n');
+        }
+#endif
+#ifdef LINUX_BOOT_TRAP_TRACE
+        /* Each time core->pc transitions into mtvec (0x80001cbc for the
+           rv32nommu 6.1.14 kernel we test against), log mcause/mepc/
+           mtval plus a few caller-saved regs. Useful for spotting the
+           first exception the kernel takes. Bounded to avoid swamping
+           output on fault loops. If you re-target a different kernel
+           image, update the mtvec literal below. */
+        if (core->pc == 0x80001cbcu && prev_pc != 0x80001cbcu
+                && trap_log_count < 16u) {
+            __mtg_output('T');
+            __mtg_output(':');
+            hex32(core->mcause);
+            __mtg_output(':');
+            hex32(core->mepc);
+            __mtg_output(':');
+            hex32(core->mtval);
+            __mtg_output('\n');
+            trap_log_count++;
+        }
+        prev_pc = core->pc;
+#endif
+#ifdef LINUX_BOOT_PC_HIST
+        pc_hist_add(core->pc);
+#endif
 #ifdef LINUX_BOOT_TRACE
         if ((i & 0x7Fu) == 0u) {
             uint32_t pc = core->pc;
@@ -246,4 +371,7 @@ void _start(void) {
         }
 #endif
     }
+#ifdef LINUX_BOOT_PC_HIST
+    pc_hist_dump();
+#endif
 }

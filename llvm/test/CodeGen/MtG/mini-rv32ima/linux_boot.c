@@ -388,6 +388,15 @@ void _start(void) {
             if ((uint32_t)ch != 0xFFFFFFFFu) {
                 uart_rx_buf = (uint8_t)ch;
                 uart_rx_valid = 1;
+#ifdef LINUX_BOOT_INPUT_DEBUG
+                /* Emit a sentinel the moment a byte is latched from
+                   AInput — lets us tell on the host side whether the
+                   input queue ever delivered anything, independent of
+                   whether the guest kernel noticed the LSR.RDR bit. */
+                __mtg_output('[');
+                __mtg_output(ch);
+                __mtg_output(']');
+#endif
             }
         }
         int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, elapsed_us, 1);

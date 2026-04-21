@@ -612,6 +612,11 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // the per-iteration byte temp because it isn't touched between the LOAD
     // / ADD / MULT / SUB1COND operations of the loop.
     //
+    // The high-byte iteration is special-cased: we load directly into
+    // $val rather than Zero-ing it and doing an extra Add with R6, saving
+    // two primitives per expansion. ~232 LOADBYTEWISE instances in the
+    // Linux-boot interpreter add up to a meaningful shave of static code.
+    //
     // IterAddrReg must avoid $val, $addr, AND any register that's still
     // live at this MI. RegAllocFast sometimes leaves values live across
     // pseudos whose Defs list should have forced a spill, so we don't
@@ -666,7 +671,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     std::vector<MachineInstr *> NumBuildMIs;
 
     BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(3));
@@ -678,8 +682,19 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(256));
 
-    for (int i = 0; i < 4; ++i) {
-      // Byte temp lives in R6 — no Divide in this loop so it's stable.
+    // First iteration (the high byte): load directly into $val so we
+    // don't need to Zero it and then Add R6 — one Load suffices.
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValReg)
+        .addUse(IterAddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), IterAddrReg)
+        .addUse(IterAddrReg);
+
+    // Remaining three bytes: Load byte into R6 (scratch), Add into
+    // $val, then shift $val up by 256 unless this is the last byte.
+    for (int i = 1; i < 4; ++i) {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R6)
           .addUse(IterAddrReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
@@ -752,7 +767,6 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     std::vector<MachineInstr *> NumBuildMIs;
 
     BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, IterAddrReg, AddrReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ZERO), ValReg);
     NumBuildMIs.push_back(
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(1));
@@ -764,20 +778,22 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(256));
 
-    for (int i = 0; i < 2; ++i) {
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R6)
-          .addUse(IterAddrReg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
-          .addUse(ValReg)
-          .addUse(MtG::R6);
-      if (i < 1) {
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
-            .addUse(ValReg)
-            .addUse(MtG::R0);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), IterAddrReg)
-            .addUse(IterAddrReg);
-      }
-    }
+    // High byte direct into $val (skip Zero + initial Add — same trick as
+    // the 4-cell LOADBYTEWISE_MACRO above).
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), ValReg)
+        .addUse(IterAddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::MULT), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R0);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::SUB1COND), IterAddrReg)
+        .addUse(IterAddrReg);
+
+    // Low byte.
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::LOAD), MtG::R6)
+        .addUse(IterAddrReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), ValReg)
+        .addUse(ValReg)
+        .addUse(MtG::R6);
 
     for (auto *NumBuildMI : NumBuildMIs)
       expandPostRAPseudo(*NumBuildMI);

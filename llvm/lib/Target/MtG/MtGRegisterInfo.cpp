@@ -391,15 +391,25 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     } else {
       // Mirror of LOADBYTEWISE_MACRO: high byte first, accumulate via *256.
       // OpReg serves as both ValReg and accumulator; no separate ByteWorkReg
-      // needed (R6 is the per-iteration byte temp).
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ZERO), OpReg));
+      // needed (R6 is the per-iteration byte temp). The first iteration
+      // loads directly into OpReg so we skip the usual Zero + initial Add
+      // pair (saves 2 primitives per expansion — matches the analogous
+      // optimization in MtGInstrInfo.cpp's LOADBYTEWISE_MACRO handler).
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(3));
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD), TmpReg)
                          .addUse(TmpReg)
                          .addUse(MtG::R0));
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
                          .addImm(256));
-      for (int i = 0; i < 4; ++i) {
+      // High byte straight into the accumulator.
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOAD), OpReg)
+                         .addUse(TmpReg));
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MULT), OpReg)
+                         .addUse(OpReg)
+                         .addUse(MtG::R0));
+      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::SUB1COND), TmpReg)
+                         .addUse(TmpReg));
+      for (int i = 1; i < 4; ++i) {
         MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOAD), MtG::R6)
                            .addUse(TmpReg));
         MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD), OpReg)

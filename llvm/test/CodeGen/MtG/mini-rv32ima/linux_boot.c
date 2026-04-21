@@ -23,18 +23,18 @@
  *   python3 ursa/tools/mtg-link.py /tmp/t.s -o /tmp/linked.s
  *   ursa/ursa-rs/target/release/ursa-rs /tmp/linked.s --zero-mem \
  *       --rom /path/to/Image@1024 \
- *       --rom /path/to/dtb.bin@8387904
+ *       --rom /path/to/dtb.bin@16776512
  *
- * Why 1024 and 8387904:
+ * Why 1024 and 16776512 (for the default 16 MB RAM_SIZE below):
  *   ram_words lives at MtG byte address 1024 (the start of globals;
  *   confirm via `print(prog.globals["ram_words"])` in ursa's assembler
  *   module, or by reading `.comm ram_words` layout in the linked .s).
  *   The kernel image goes at ram_words byte 0, i.e. MtG address 1024.
  *   The DTB goes at ram_words byte (RAM_SIZE - sizeof(state) - DTB_SIZE)
- *   = 8388608 - 192 - 1536 = 8386880, i.e. MtG address 1024 + 8386880
- *   = 8387904. Miscounting this by even a single cell lands the kernel
- *   on "memory@8000..." strings inside the DTB body and makes
- *   fdt_check_header fail silently — been there.
+ *   = 16777216 - 192 - 1536 = 16775488, i.e. MtG address 1024 + 16775488
+ *   = 16776512. (For 8 MB it was 8387904.) Miscounting this by even a
+ *   single cell lands the kernel on "memory@8000..." strings inside the
+ *   DTB body and makes fdt_check_header fail silently — been there.
  */
 
 #include <mtg.h>
@@ -51,10 +51,13 @@ typedef unsigned long long uint64_t;
 #define NULL ((void*)0)
 #define INT32_MIN (-2147483647 - 1)
 
-/* 8 MB simulated DRAM. At 1 cell/byte this is 8 M cells in ursa's
-   memory dict — the zero-init read path (--zero-mem) keeps us from
-   having to prefill it. Scale up later if the kernel needs more. */
-#define RAM_SIZE (8 * 1024 * 1024)
+/* 16 MB simulated DRAM. At 1 cell/byte this is 16 M cells in ursa's
+   memory dict, but --zero-mem keeps uninitialized reads cheap so the
+   dict only grows as the kernel actually writes. 8 MB boots through
+   'workingset' but dies allocating binflat user processes (the default
+   initramfs /init needs ~700 KB contiguous plus stack/heap); 16 MB is
+   enough to reach the 'buildroot login:' prompt. */
+#define RAM_SIZE (16 * 1024 * 1024)
 #define DTB_SIZE 1536  /* matches mini-rv32ima's default64mbdtc.h */
 static uint32_t ram_words[RAM_SIZE / 4];
 
@@ -168,7 +171,7 @@ static uint32_t mmio_store_count;
 static uint32_t mmio_load_count;
 #endif
 
-#if defined(LINUX_BOOT_PC_HIST) || defined(LINUX_BOOT_TRAP_TRACE) || defined(LINUX_BOOT_STEP_TRACE)
+#if defined(LINUX_BOOT_PC_HIST) || defined(LINUX_BOOT_TRAP_TRACE) || defined(LINUX_BOOT_STEP_TRACE) || defined(LINUX_BOOT_MMIO_TRACE)
 static void hex32(uint32_t v) {
     unsigned k;
     for (k = 0; k < 8; k++) {
@@ -179,28 +182,18 @@ static void hex32(uint32_t v) {
 #endif
 
 #ifdef LINUX_BOOT_PC_HIST
-/* Hash-based PC histogram: key=PC, cnt=hits. Linear-probe, drop on
-   overflow. 8192 slots covers ~1k distinct hot PCs comfortably. */
-#define PC_HIST_SIZE 8192u
-#define PC_HIST_MASK (PC_HIST_SIZE - 1u)
-static uint32_t pc_hist_key[PC_HIST_SIZE];
-static uint32_t pc_hist_cnt[PC_HIST_SIZE];
-static uint32_t pc_hist_dropped;
+/* Direct-indexed PC bucket histogram. Bucket = (pc >> 4) & mask, so
+   each bucket covers a 16-byte slice of code; 64 K buckets wraps every
+   1 MB so collisions are sparse for a ~4 MB kernel (any two colliding
+   PCs differ by exactly 1 MB). pc_hist_add is 1 load + 1 store — much
+   cheaper than the hash-probe version it replaces, so leaving it on
+   during multi-billion-step runs is practical. */
+#define PC_HIST_BUCKETS 65536u
+#define PC_HIST_MASK (PC_HIST_BUCKETS - 1u)
+static uint32_t pc_hist_cnt[PC_HIST_BUCKETS];
 
 static void pc_hist_add(uint32_t pc) {
-    uint32_t h = (pc * 2654435761u) & PC_HIST_MASK;
-    uint32_t probe;
-    for (probe = 0; probe < PC_HIST_SIZE; probe++) {
-        uint32_t slot = (h + probe) & PC_HIST_MASK;
-        uint32_t k = pc_hist_key[slot];
-        if (k == pc) { pc_hist_cnt[slot]++; return; }
-        if (k == 0 && pc_hist_cnt[slot] == 0) {
-            pc_hist_key[slot] = pc;
-            pc_hist_cnt[slot] = 1;
-            return;
-        }
-    }
-    pc_hist_dropped++;
+    pc_hist_cnt[(pc >> 4) & PC_HIST_MASK]++;
 }
 
 static void pc_hist_dump(void) {
@@ -208,27 +201,28 @@ static void pc_hist_dump(void) {
     __mtg_output('\n');
     __mtg_output('H'); __mtg_output('I'); __mtg_output('S'); __mtg_output('T');
     __mtg_output(':'); __mtg_output('\n');
-    for (i = 0; i < PC_HIST_SIZE; i++) {
+    for (i = 0; i < PC_HIST_BUCKETS; i++) {
         uint32_t c = pc_hist_cnt[i];
         if (c == 0) continue;
-        hex32(pc_hist_key[i]);
+        /* Print bucket index (pc>>4 & mask) followed by hit count.
+           Multiple PCs can alias to the same bucket; recover the 1-MB
+           windows by scanning the actual kernel text. */
+        hex32(i << 4);
         __mtg_output('=');
         hex32(c);
         __mtg_output('\n');
     }
-    __mtg_output('D'); __mtg_output('R'); __mtg_output('O'); __mtg_output('P');
-    __mtg_output('=');
-    hex32(pc_hist_dropped);
-    __mtg_output('\n');
 }
 #endif
 
 static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
 #ifdef LINUX_BOOT_MMIO_TRACE
-    /* Emit one '>' per store to any MMIO address. Lets us see whether
-       the kernel reaches device code at all. */
-    mmio_store_count++;
-    if ((mmio_store_count & 0xFF) == 0) __mtg_output('>');
+    /* Count MMIO stores (excluding UART data writes, which are already
+       visible as kernel output — no need to mark them). Summary is
+       emitted once at end of the run; we do NOT stream '>' inline the
+       way earlier versions did, since __mtg_output is shared with UART
+       and markers polluted printk text. */
+    if (addy != 0x10000000u) mmio_store_count++;
 #endif
     if (addy == 0x10000000) {
         __mtg_output(val);
@@ -246,7 +240,6 @@ static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
 static uint32_t HandleControlLoad(uint32_t addy) {
 #ifdef LINUX_BOOT_MMIO_TRACE
     mmio_load_count++;
-    if ((mmio_load_count & 0xFF) == 0) __mtg_output('<');
 #endif
     if (addy == 0x10000005) return 0x60;
     if (addy == 0x1100BFF8) return g_core ? g_core->timerl : 0;
@@ -316,8 +309,27 @@ void _start(void) {
     uint32_t prev_pc = 0xFFFFFFFFu;
     uint32_t trap_log_count = 0;
 #endif
+    /* Advance the CLINT timer by 1 μs only every TIMER_GRAIN RV32 insns.
+       With grain = 1 (the old default), our 240 M MtG-steps/s simulator
+       reported ~1 guest-μs per ~18 k MtG steps, which means CONFIG_HZ=100
+       ticks (10 ms = 10 000 guest μs) fired every ~10 000 RV32 insns —
+       so hundreds of timer ISRs per "0.1 real wall-time second" of actual
+       kernel work. Bumping the grain to 64 stretches guest μs across
+       more RV32 insns and keeps ISR overhead reasonable; udelay still
+       behaves correctly (it loops until mtime advances, just takes more
+       RV32 insns, same wall time). */
+#ifndef LINUX_BOOT_TIMER_GRAIN
+#define LINUX_BOOT_TIMER_GRAIN 64u
+#endif
+    uint32_t timer_tick_ctr = 0;
     for (i = 0; i < LINUX_BOOT_MAX_RV32_STEPS && !done_flag; i++) {
-        int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, 1, 1);
+        uint32_t elapsed_us = 0;
+        timer_tick_ctr++;
+        if (timer_tick_ctr >= (uint32_t)LINUX_BOOT_TIMER_GRAIN) {
+            timer_tick_ctr = 0;
+            elapsed_us = 1;
+        }
+        int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, elapsed_us, 1);
         if (ret == 0x5555) {
             done_flag = 1;
         }
@@ -356,7 +368,13 @@ void _start(void) {
         prev_pc = core->pc;
 #endif
 #ifdef LINUX_BOOT_PC_HIST
-        pc_hist_add(core->pc);
+#ifdef LINUX_BOOT_PC_HIST_SKIP
+        /* Skip histogram accumulation for the first N RV32 steps. Handy
+           for zooming in on post-workingset code without being swamped
+           by the long early-boot BSS-zero / setup phase. */
+        if (i >= (uint32_t)LINUX_BOOT_PC_HIST_SKIP)
+#endif
+            pc_hist_add(core->pc);
 #endif
 #ifdef LINUX_BOOT_TRACE
         if ((i & 0x7Fu) == 0u) {
@@ -373,5 +391,14 @@ void _start(void) {
     }
 #ifdef LINUX_BOOT_PC_HIST
     pc_hist_dump();
+#endif
+#ifdef LINUX_BOOT_MMIO_TRACE
+    __mtg_output('\n');
+    __mtg_output('M'); __mtg_output('M'); __mtg_output('I'); __mtg_output('O');
+    __mtg_output(' '); __mtg_output('s'); __mtg_output('t'); __mtg_output('=');
+    hex32(mmio_store_count);
+    __mtg_output(' '); __mtg_output('l'); __mtg_output('d'); __mtg_output('=');
+    hex32(mmio_load_count);
+    __mtg_output('\n');
 #endif
 }

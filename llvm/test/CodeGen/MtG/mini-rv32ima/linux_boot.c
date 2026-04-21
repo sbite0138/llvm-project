@@ -215,6 +215,14 @@ static void pc_hist_dump(void) {
 }
 #endif
 
+/* 8250 UART: bit 7 of LCR selects the "divisor latch" bank. When it's
+   set, reads/writes at 0x10000000/0x10000001 target DLL/DLM (the baud
+   divisor) instead of THR/RBR/IER. Without this the kernel's divisor
+   setup during ttyS0 probe looks like stray printable characters
+   (e.g. "``m" ahead of "Freeing unused kernel image") because we'd
+   send the divisor bytes straight through __mtg_output. */
+static uint32_t uart_lcr_dlab;
+
 static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
 #ifdef LINUX_BOOT_MMIO_TRACE
     /* Count MMIO stores (excluding UART data writes, which are already
@@ -224,8 +232,17 @@ static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
        and markers polluted printk text. */
     if (addy != 0x10000000u) mmio_store_count++;
 #endif
+    if (addy == 0x10000003u) {
+        /* LCR write. Latch bit 7 so subsequent 0x10000000 writes are
+           interpreted correctly (DLL when DLAB=1, THR when DLAB=0). */
+        uart_lcr_dlab = val & 0x80u;
+        return 0;
+    }
     if (addy == 0x10000000) {
-        __mtg_output(val);
+        /* Only emit when DLAB=0; otherwise this is a baud-divisor write
+           and has no observable character side-effect. */
+        if (!uart_lcr_dlab)
+            __mtg_output(val);
         return 0;
     }
     if (addy == 0x11100000) {

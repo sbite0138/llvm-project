@@ -223,6 +223,16 @@ static void pc_hist_dump(void) {
    send the divisor bytes straight through __mtg_output. */
 static uint32_t uart_lcr_dlab;
 
+/* One-byte RX buffer between MtG's AInput (host stdin) and the guest's
+   8250 UART RBR / LSR.RDR. The harness's main loop polls AInput on
+   every RV32 step: if there's a byte waiting and our RX slot is empty,
+   we latch it here. The kernel then sees LSR bit 0 (RDR = receive data
+   ready) set, reads RBR to consume the byte, and the slot goes back to
+   empty. One byte is enough because the kernel drains RBR quickly and
+   humans type way slower than the kernel polls. */
+static uint8_t  uart_rx_buf;
+static uint32_t uart_rx_valid;
+
 static uint32_t HandleControlStore(uint32_t addy, uint32_t val) {
 #ifdef LINUX_BOOT_MMIO_TRACE
     /* Count MMIO stores (excluding UART data writes, which are already
@@ -258,7 +268,27 @@ static uint32_t HandleControlLoad(uint32_t addy) {
 #ifdef LINUX_BOOT_MMIO_TRACE
     mmio_load_count++;
 #endif
-    if (addy == 0x10000005) return 0x60;
+    if (addy == 0x10000000u) {
+        /* Split just like the store side: 0x10000000 is DLL when DLAB=1
+           (baud-divisor low — the kernel reads to verify the divisor it
+           wrote), otherwise it's RBR. For RBR, hand over the latched
+           stdin byte and mark the slot empty so the next AInput poll
+           can refill it. */
+        if (uart_lcr_dlab)
+            return 0;
+        if (uart_rx_valid) {
+            uint32_t v = uart_rx_buf;
+            uart_rx_valid = 0;
+            return v;
+        }
+        return 0;
+    }
+    if (addy == 0x10000005u) {
+        /* LSR. Bits: 0x01=RDR, 0x20=THRE, 0x40=TEMT. Transmit is always
+           idle (we don't simulate latency); receive is ready iff our
+           one-byte slot is currently latched. */
+        return 0x60u | (uart_rx_valid ? 0x01u : 0u);
+    }
     if (addy == 0x1100BFF8) return g_core ? g_core->timerl : 0;
     if (addy == 0x1100BFFC) return g_core ? g_core->timerh : 0;
     return 0;
@@ -345,6 +375,20 @@ void _start(void) {
         if (timer_tick_ctr >= (uint32_t)LINUX_BOOT_TIMER_GRAIN) {
             timer_tick_ctr = 0;
             elapsed_us = 1;
+        }
+        /* Poll MtG AInput for stdin bytes and cache at most one in the
+           8250 RX slot. The kernel sees data via LSR.RDR + RBR reads;
+           if the slot is already full we skip — bytes stay in the
+           ursa-rs input queue until the kernel drains the current one.
+           `__mtg_input_a` returns -1 (0xFFFFFFFF) when stdin has
+           nothing to hand over, which is the dominant case and is
+           effectively free: a single MtG primitive per step. */
+        if (!uart_rx_valid) {
+            int ch = __mtg_input_a();
+            if ((uint32_t)ch != 0xFFFFFFFFu) {
+                uart_rx_buf = (uint8_t)ch;
+                uart_rx_valid = 1;
+            }
         }
         int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, elapsed_us, 1);
         if (ret == 0x5555) {

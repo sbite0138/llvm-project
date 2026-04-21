@@ -171,7 +171,7 @@ static uint32_t mmio_store_count;
 static uint32_t mmio_load_count;
 #endif
 
-#if defined(LINUX_BOOT_PC_HIST) || defined(LINUX_BOOT_TRAP_TRACE) || defined(LINUX_BOOT_STEP_TRACE) || defined(LINUX_BOOT_MMIO_TRACE)
+#if defined(LINUX_BOOT_PC_HIST) || defined(LINUX_BOOT_TRAP_TRACE) || defined(LINUX_BOOT_STEP_TRACE) || defined(LINUX_BOOT_MMIO_TRACE) || defined(LINUX_BOOT_STEP_COUNT)
 static void hex32(uint32_t v) {
     unsigned k;
     for (k = 0; k < 8; k++) {
@@ -309,27 +309,42 @@ void _start(void) {
     uint32_t prev_pc = 0xFFFFFFFFu;
     uint32_t trap_log_count = 0;
 #endif
-    /* Advance the CLINT timer by 1 μs only every TIMER_GRAIN RV32 insns.
+    /* Advance the CLINT timer by 1 µs only every TIMER_GRAIN RV32 insns.
        With grain = 1 (the old default), our 240 M MtG-steps/s simulator
-       reported ~1 guest-μs per ~18 k MtG steps, which means CONFIG_HZ=100
-       ticks (10 ms = 10 000 guest μs) fired every ~10 000 RV32 insns —
-       so hundreds of timer ISRs per "0.1 real wall-time second" of actual
-       kernel work. Bumping the grain to 64 stretches guest μs across
-       more RV32 insns and keeps ISR overhead reasonable; udelay still
-       behaves correctly (it loops until mtime advances, just takes more
-       RV32 insns, same wall time). */
+       reported ~1 guest-µs per ~18 k MtG steps, so CONFIG_HZ=100 ticks
+       (10 ms = 10 000 guest µs) fired every ~10 000 RV32 insns — a
+       dense storm of timer ISRs that throttled real kernel work to a
+       tiny slice of the step budget. grain=64 keeps ISR overhead
+       reasonable; udelay still behaves correctly (it loops on mtime,
+       just takes more RV32 insns for the same real wall time).
+
+       ALSO: invoke MiniRV32IMAStep with count=TIMER_GRAIN (when no
+       per-step diagnostics are enabled). mini-rv32ima.h runs the timer
+       update / WFI / mip bookkeeping block ONCE per call and then loops
+       `count` times internally, so batching N RV32 instructions per
+       call amortizes that ~200 MtG of bookkeeping across the batch.
+       Any of the diagnostic flags that need per-step visibility force
+       count back down to 1. */
 #ifndef LINUX_BOOT_TIMER_GRAIN
 #define LINUX_BOOT_TIMER_GRAIN 64u
 #endif
+#if defined(LINUX_BOOT_STEP_TRACE) || defined(LINUX_BOOT_TRAP_TRACE) \
+    || defined(LINUX_BOOT_TRACE) || defined(LINUX_BOOT_PC_HIST)
+#define LINUX_BOOT_STEP_BATCH 1u
+#else
+#define LINUX_BOOT_STEP_BATCH ((uint32_t)LINUX_BOOT_TIMER_GRAIN)
+#endif
     uint32_t timer_tick_ctr = 0;
-    for (i = 0; i < LINUX_BOOT_MAX_RV32_STEPS && !done_flag; i++) {
+    for (i = 0; i < LINUX_BOOT_MAX_RV32_STEPS && !done_flag;
+            i += LINUX_BOOT_STEP_BATCH) {
         uint32_t elapsed_us = 0;
-        timer_tick_ctr++;
+        timer_tick_ctr += LINUX_BOOT_STEP_BATCH;
         if (timer_tick_ctr >= (uint32_t)LINUX_BOOT_TIMER_GRAIN) {
             timer_tick_ctr = 0;
             elapsed_us = 1;
         }
-        int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0, elapsed_us, 1);
+        int32_t ret = MiniRV32IMAStep(core, (uint8_t *)ram_words, 0,
+                                      elapsed_us, LINUX_BOOT_STEP_BATCH);
         if (ret == 0x5555) {
             done_flag = 1;
         }
@@ -389,6 +404,11 @@ void _start(void) {
         }
 #endif
     }
+#ifdef LINUX_BOOT_STEP_COUNT
+    __mtg_output('\n');
+    __mtg_output('R'); __mtg_output('V'); __mtg_output('3'); __mtg_output('2');
+    __mtg_output('='); hex32(i); __mtg_output('\n');
+#endif
 #ifdef LINUX_BOOT_PC_HIST
     pc_hist_dump();
 #endif

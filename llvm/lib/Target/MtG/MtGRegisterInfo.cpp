@@ -69,6 +69,20 @@ static void narrowAddMacroClobbers(MachineInstr &MI) {
 //   * R2 (SP) is the address iterator — it is mutated and restored.
 //   * VictimReg itself is destroyed during byte extraction, but its value is
 //     persisted to memory so destroying it is fine.
+// Helper: insert a NUMBUILD_MACRO and expand it in-place. The generic
+// ExpandPostRAPseudos pass that normally catches NUMBUILD_MACRO runs
+// *after* PrologEpilogInserter, but we've seen cases where some of the
+// macros emitted from FI elimination slip through the pass (observed:
+// byte-wise emergency save/reload in core_list_join codegen). Expanding
+// at the insertion site makes the result independent of pass ordering.
+static void
+insertExpandedNumBuild(MachineBasicBlock &MBB,
+                       MachineBasicBlock::iterator II, const DebugLoc &DL,
+                       const TargetInstrInfo &TII, int64_t Imm) {
+  auto MI = BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(Imm);
+  TII.expandPostRAPseudo(*MI);
+}
+
 void MtGRegisterInfo::emitEmergencySave(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator II,
                                         const TargetInstrInfo &TII,
@@ -80,7 +94,7 @@ void MtGRegisterInfo::emitEmergencySave(MachineBasicBlock &MBB,
     for (int i = 0; i < 4; ++i)
       BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
   // R0 = 256
-  BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
+  insertExpandedNumBuild(MBB, II, DL, TII, 256);
   for (int i = 0; i < 4; ++i) {
     BuildMI(MBB, II, DL, TII.get(MtG::DIVIDE), VictimReg).addUse(VictimReg);
     BuildMI(MBB, II, DL, TII.get(MtG::STORE)).addUse(VictimReg).addUse(MtG::R2);
@@ -114,7 +128,7 @@ void MtGRegisterInfo::emitEmergencyReload(MachineBasicBlock &MBB,
   for (int i = 0; i < 3 + (Slot == 1 ? 4 : 0); ++i)
     BuildMI(MBB, II, DL, TII.get(MtG::ADD1), MtG::R2).addUse(MtG::R2);
   // R0 = 256
-  BuildMI(MBB, II, DL, TII.get(MtG::NUMBUILD_MACRO)).addImm(256);
+  insertExpandedNumBuild(MBB, II, DL, TII, 256);
   // VictimReg = byte 3
   BuildMI(MBB, II, DL, TII.get(MtG::LOAD), VictimReg).addUse(MtG::R2);
   for (int i = 0; i < 3; ++i) {
@@ -228,8 +242,7 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), DstReg)
                          .addUse(getFrameRegister(MF)));
 
-    MBB.insert(
-        II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(totalOffset));
+    insertExpandedNumBuild(MBB, II, DL, *TII, totalOffset);
 
     if (!MI.isDebugValue() && !isInt<16>(Offset)) {
       assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
@@ -354,8 +367,7 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     if (TmpReg != getFrameRegister(MF))
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), TmpReg)
                          .addUse(getFrameRegister(MF)));
-    MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
-                       .addImm(totalOffset));
+    insertExpandedNumBuild(MBB, II, DL, *TII, totalOffset);
     {
       auto AddMI = BuildMI(MF, DL, TII->get(MtG::ADD_MACRO), TmpReg)
                        .addReg(TmpReg)
@@ -373,8 +385,7 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       if (ByteWorkReg != OpReg)
         MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::MOVE), ByteWorkReg)
                            .addUse(OpReg));
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
-                         .addImm(256));
+      insertExpandedNumBuild(MBB, II, DL, *TII, 256);
       for (int i = 0; i < 4; ++i) {
         MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::DIVIDE), ByteWorkReg)
                            .addUse(ByteWorkReg));
@@ -395,12 +406,11 @@ bool MtGRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       // loads directly into OpReg so we skip the usual Zero + initial Add
       // pair (saves 2 primitives per expansion — matches the analogous
       // optimization in MtGInstrInfo.cpp's LOADBYTEWISE_MACRO handler).
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO)).addImm(3));
+      insertExpandedNumBuild(MBB, II, DL, *TII, 3);
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::ADD), TmpReg)
                          .addUse(TmpReg)
                          .addUse(MtG::R0));
-      MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::NUMBUILD_MACRO))
-                         .addImm(256));
+      insertExpandedNumBuild(MBB, II, DL, *TII, 256);
       // High byte straight into the accumulator.
       MBB.insert(II, BuildMI(MF, DL, TII->get(MtG::LOAD), OpReg)
                          .addUse(TmpReg));

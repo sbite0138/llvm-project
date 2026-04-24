@@ -398,13 +398,55 @@ bool MtGInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     assert(UseRegs.count(DstReg) == 0 && "Invalid DstReg");
     assert((UseRegs.count(SrcReg) == 0 || !isRegisterLiveAfter(MI, SrcReg)) &&
            "Invalid SrcReg - register conflicts with macro expansion");
+
+    // NEG_MACRO rN negates rN in place (MULT with -1 mod 2^32), i.e. it
+    // DESTROYS the source. If we apply it straight to SrcReg while SrcReg
+    // is still needed by a later instruction (the classic case: a
+    // loop-invariant subtrahend), the second iteration reads the
+    // already-negated value and the negation flips it back, so the
+    // effective op alternates between sub and add per iteration.
+    //
+    // Caught by coremark at -O1: `matrix_add_const(N, A, -val)` inlined
+    // into the surrounding loop corrupted every other element of A.
+    //
+    // If SrcReg is still live, stage the negation in an allocatable
+    // scratch register we pick out of the LivePhysRegs set below.
+    // NEG_MACRO's inner REM_MACRO rejects R0/R6 as DstReg, so the scratch
+    // must be one of R1/R3/R4/R5/R7..R11. If nothing is free, fall through
+    // to the in-place path — the assertion above will surface the
+    // scavenger miss rather than silently miscompile.
+    Register NegReg = SrcReg;
+    if (isRegisterLiveAfter(MI, SrcReg)) {
+      const MachineFunction &MF = *MBB.getParent();
+      LivePhysRegs LivePhys(getRegisterInfo());
+      LivePhys.addLiveOuts(MBB);
+      for (auto It = MBB.rbegin(); It != MBB.rend(); ++It) {
+        if (&*It == &MI)
+          break;
+        LivePhys.stepBackward(*It);
+      }
+      static const Register Candidates[] = {MtG::R1, MtG::R3, MtG::R4,
+                                            MtG::R5, MtG::R7, MtG::R8,
+                                            MtG::R9, MtG::R10, MtG::R11};
+      for (Register R : Candidates) {
+        if (R == DstReg || R == SrcReg)
+          continue;
+        if (LivePhys.available(MF.getRegInfo(), R)) {
+          NegReg = R;
+          break;
+        }
+      }
+      assert(NegReg != SrcReg &&
+             "SUB_MACRO: no free scratch for non-destructive NEG");
+      BuildSafeMove(MBB, MI, MI.getDebugLoc(), TII, NegReg, SrcReg);
+    }
     auto NegMI =
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), SrcReg)
-            .addUse(SrcReg);
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NEG_MACRO), NegReg)
+            .addUse(NegReg);
     expandPostRAPseudo(*NegMI);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::ADD), DstReg)
         .addUse(DstReg)
-        .addUse(SrcReg);
+        .addUse(NegReg);
     auto NumBuildMI =
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MtG::NUMBUILD_MACRO))
             .addImm(1UL << 32);

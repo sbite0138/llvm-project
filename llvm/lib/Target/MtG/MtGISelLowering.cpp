@@ -248,6 +248,13 @@ SDValue MtGTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SDLoc &dl = CLI.DL;
   SDValue Chain = CLI.Chain;
 
+  // MtG has no tail-call (branch-to-callee) form — the only call
+  // encoding pushes a return address onto the hardware return stack.
+  // Force every supposedly-tail call back to a regular call so we
+  // don't trip the CallLoweringInfo invariant that tail-call lowers
+  // must leave InVals empty (which our LowerCallResult always fills).
+  CLI.IsTailCall = false;
+
   // Intercept calls to the MtG "output" builtin. Programs can emit a value
   // by declaring `declare void @__mtg_output(i32)` and calling it; we lower
   // the call directly to the hardware Output instruction instead of a real

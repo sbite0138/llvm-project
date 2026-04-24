@@ -156,15 +156,16 @@ void MtGDAGToDAGISel::Select(SDNode *Node) {
     }
     if (FIN && CN) {
       int FI = FIN->getIndex();
-      int64_t ofs = CN->getSExtValue();
-      // Use getTargetFrameIndex so the operand survives as a real
-      // FrameIndex MachineOperand through to eliminateFrameIndex.
-      // With the non-target form, MI emission materialised the FI via a
-      // register copy and eliminateFrameIndex never saw it, leaving
-      // ADD_MACRO_FI in the final asm — hit for e.g. i64 stack loads
-      // where the +4 offset triggers this (FI, const) pattern.
+      // Truncate the APInt to PtrVT's width (32 on MtG). Using
+      // getSExtValue() + the uint64_t overload of getTargetConstant
+      // crashes an assertion in APInt for negative offsets: the
+      // sign-extended i64 (e.g. -1 → 0xFFFFFFFFFFFFFFFF) fails
+      // isUIntN(32, val). The APInt overload preserves bits past the
+      // truncation as the i32 two's-complement representation, which
+      // is what downstream FI elimination expects.
+      APInt OfsAPI = CN->getAPIntValue().trunc(PtrVT.getSizeInBits());
       SDValue FIVal = CurDAG->getTargetFrameIndex(FI, PtrVT);
-      SDValue Ofs = CurDAG->getTargetConstant(ofs, dl, PtrVT);
+      SDValue Ofs = CurDAG->getTargetConstant(OfsAPI, dl, PtrVT);
       ReplaceNode(Node, CurDAG->getMachineNode(MtG::ADD_MACRO_FI, dl, PtrVT,
                                                FIVal, Ofs));
       return;

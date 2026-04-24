@@ -1187,8 +1187,16 @@ SDValue MtGTargetLowering::LowerGlobalAddress(SDValue Op,
       SDValue(DAG.getMachineNode(MtG::MOVEADDR_MACRO, DL, PtrVT, TGA), 0);
   if (Offset == 0)
     return Base;
+  // Truncate to PtrVT bits. For a negative Offset (e.g. the compiler
+  // materialising `&global - 1` as a loop sentinel), the uint64_t
+  // overload of getConstant would hit APInt's isUIntN assertion at
+  // 32-bit PtrVT. Using the APInt overload with an explicit trunc
+  // keeps the two's-complement bit pattern MtG's address arithmetic
+  // expects.
+  APInt OffsetAPI =
+      APInt(64, static_cast<uint64_t>(Offset)).trunc(PtrVT.getSizeInBits());
   return DAG.getNode(ISD::ADD, DL, PtrVT, Base,
-                     DAG.getConstant(Offset, DL, PtrVT));
+                     DAG.getConstant(OffsetAPI, DL, PtrVT));
 }
 
 SDValue MtGTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {

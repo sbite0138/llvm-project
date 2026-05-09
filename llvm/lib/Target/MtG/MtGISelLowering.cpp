@@ -138,7 +138,9 @@ MtGTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
 SDValue MtGTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default: {
+#ifndef NDEBUG
     Op.dump();
+#endif
     llvm_unreachable("unimplemented operand");
   }
   case ISD::GlobalAddress:
